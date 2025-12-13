@@ -104,8 +104,8 @@ jobs:
           $totalGB = [math]::Round($disk.Used / 1GB + $disk.Free / 1GB, 2)
           Write-Output "Disk C: ${freeGB}GB free / ${totalGB}GB total"
 
-          if ($freeGB -lt 50) {
-            Write-Error "Insufficient disk space. At least 50GB required for Nano build, found ${freeGB}GB"
+          if ($freeGB -lt 25) {
+            Write-Error "Insufficient disk space. At least 25GB required for Nano build, found ${freeGB}GB"
             exit 1
           }
 
