@@ -132,13 +132,13 @@ function Test-Prerequisites {
         throw "Windows installation files not found"
     }
     
-    # Check disk space (minimum 25GB recommended)
+    # Check disk space (minimum 15GB recommended)
     $disk = Get-PSDrive -Name $ScratchDisk[0] -ErrorAction SilentlyContinue
     if ($disk) {
         $freeGB = [math]::Round($disk.Free / 1GB, 2)
         Write-Log "Available space on ${ScratchDisk}: ${freeGB}GB"
-        if ($freeGB -lt 25) {
-            Write-Log "Low disk space warning: ${freeGB}GB (25GB+ recommended)" "WARN"
+        if ($freeGB -lt 15) {
+            Write-Log "Low disk space warning: ${freeGB}GB (15GB+ recommended)" "WARN"
         }
     }
     

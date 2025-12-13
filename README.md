@@ -2,6 +2,7 @@
 
 [![Build Tiny11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml)
 [![Build Tiny11 Core](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml)
+[![Build Nano11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml)
 
 Automated tools for creating streamlined Windows 11 images with CI/CD support.
 
@@ -23,6 +24,7 @@ Tiny11 Automated Builder provides PowerShell scripts to create minimized Windows
 3. Select workflow:
    - **Build Tiny11** - Standard trimmed Windows 11
    - **Build Tiny11 Core** - Ultra-minimal Windows 11 Core
+   - **Build Nano11** - EXTREME minimal (VM testing only)
 4. Click "Run workflow" and fill parameters
 5. Download ISO from Releases or Artifacts
 
@@ -33,6 +35,9 @@ Tiny11 Automated Builder provides PowerShell scripts to create minimized Windows
 
 # Tiny11 Core (more aggressive)
 .\tiny11coremaker-headless.ps1 -ISO E -INDEX 1
+
+# Nano11 (EXTREME minimal - VM only)
+.\nano11builder-headless.ps1 -ISO E -INDEX 1
 
 # With .NET 3.5 (Core only)
 .\tiny11coremaker-headless.ps1 -ISO E -INDEX 1 -ENABLE_DOTNET35
@@ -47,6 +52,10 @@ Tiny11 Automated Builder provides PowerShell scripts to create minimized Windows
 ### Core Builder (Ultra-Minimal)
 - `tiny11Coremaker-BASE.ps1` - Original interactive script (ntdevlabs)
 - `tiny11coremaker-headless.ps1` - Automated version for CI/CD
+
+### Nano Builder (EXTREME Minimal)
+- `nano11builder-BASE.ps1` - Interactive script
+- `nano11builder-headless.ps1` - Automated version for CI/CD
 
 ## ⚠️ Version Comparison
 
@@ -73,6 +82,19 @@ Tiny11 Automated Builder provides PowerShell scripts to create minimized Windows
 - ✅ **Perfect for disposable VMs**
 - ✅ **Fast testing environments**
 
+### Nano11 (EXTREME Minimal)
+🔥 **WARNING: FOR VM TESTING ONLY - NOT FOR ANY REAL USE!**
+- ✅ Everything from Core, plus:
+- ❌ **Driver slimming** (printer, scanner, MFD, tape removed)
+- ❌ **Font reduction** (keeps only essential fonts)
+- ❌ **.NET Native Images removed**
+- ❌ **Input methods removed** (CHS, CHT, JPN, KOR)
+- ❌ **Services removed** (Spooler, PrintNotify, Fax, etc.)
+- ❌ **Additional apps removed** (Notepad, Paint, Photos, Camera)
+- ❌ **NO printing capability**
+- ⚠️ **Absolutely minimal - expect broken features**
+- ✅ **Smallest possible footprint (~1.5GB ISO)**
+
 ## 🔧 Parameters
 
 ### Standard Headless Parameters
@@ -92,6 +114,15 @@ Tiny11 Automated Builder provides PowerShell scripts to create minimized Windows
     [-SCRATCH <string>]        # Scratch disk
     [-SkipCleanup]             # Skip cleanup
     [-ENABLE_DOTNET35]         # Enable .NET Framework 3.5 (Core only!)
+```
+
+### Nano Headless Parameters
+```powershell
+.\nano11builder-headless.ps1
+    -ISO <string>              # Drive letter of mounted Windows ISO
+    -INDEX <int>               # Image index
+    [-SCRATCH <string>]        # Scratch disk (defaults to script directory)
+    [-SkipCleanup]             # Skip cleanup for debugging
 ```
 
 ## 🏗️ GitHub Actions Workflows
@@ -115,9 +146,21 @@ Workflow: `.github/workflows/build-tiny11-core.yml`
 - `skip_cleanup` - Debug mode
 - **`enable_dotnet35`** - Enable .NET 3.5 (Core only)
 
+### Build Nano11 (EXTREME Minimal)
+Workflow: `.github/workflows/build-nano11.yml`
+
+**Inputs:**
+- `windows_version` - Version string (24H2, 25H2)
+- `windows_iso_url` - Windows 11 ISO download URL
+- `image_index` - Windows edition
+- `language` - Language name
+- `skip_cleanup` - Debug mode
+
+⚠️ **Note:** Nano11 uses `autounattend-nano.xml` which includes advanced OOBE automation.
+
 ## 📦 What Gets Removed?
 
-### Apps Removed (49 total)
+### Apps Removed (49 total - Standard/Core)
 - Microsoft Teams, OneDrive, Edge
 - Xbox apps and gaming overlays
 - Clipchamp, Paint 3D, Photos
@@ -126,6 +169,14 @@ Workflow: `.github/workflows/build-tiny11-core.yml`
 - Office Hub, Power Automate
 - DevHome, Outlook for Windows
 - And 30+ more...
+
+### Additional Removals (Nano11 only)
+- Notepad, Paint, Photos, Camera
+- Printer/Scanner/MFD/Tape drivers
+- Most fonts (keeps only essentials)
+- .NET Native Images
+- CJK input methods
+- Spooler, PrintNotify, Fax services
 
 ### System Packages Removed (12)
 - Internet Explorer
@@ -199,6 +250,7 @@ Typical build durations on GitHub Actions:
 - **Download:** 5-15 minutes (depends on ISO size)
 - **Standard Tiny11:** 45-80 minutes
 - **Tiny11 Core:** 30-45 minutes (WinSxS optimization)
+- **Nano11:** 60-90 minutes (extensive removal + ESD compression)
 
 ## 🐛 Troubleshooting
 

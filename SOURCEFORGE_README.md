@@ -14,6 +14,8 @@ Browse our organized folders below to find the edition and version you need:
 - **Tiny11-EDUCATION-{VERSION}** - Standard Tiny11 builds for Education edition
 - **Tiny11Core-HOME-{VERSION}** - Minimal Core builds for Home edition
 - **Tiny11Core-PRO-{VERSION}** - Minimal Core builds for Pro edition
+- **Nano11-HOME-{VERSION}** - EXTREME minimal builds (VM testing only)
+- **Nano11-PRO-{VERSION}** - EXTREME minimal builds (VM testing only)
 
 ### 🔍 Finding Your Build
 Each folder contains:
@@ -44,6 +46,13 @@ Each folder contains:
 - No Windows Updates possible
 - Designed for VMs and testing only
 - **NOT suitable for daily use**
+
+### Nano11
+- EXTREME minimal Windows 11 image
+- Removes drivers, fonts, services, apps
+- No printing, no Notepad/Paint
+- **FOR VM TESTING ONLY**
+- Smallest possible footprint (~1.5GB)
 
 ## ⚠️ Important Notes
 

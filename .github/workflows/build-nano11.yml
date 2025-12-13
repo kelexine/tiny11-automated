@@ -1,0 +1,628 @@
+# GitHub Actions Workflow for building Nano11 ISO
+# Author: kelexine (https://github.com/kelexine)
+# Description: Fully automated Windows 11 Nano ISO processing with nano11builder
+# Repository: https://github.com/kelexine/tiny11-automated
+
+name: Build and Release Nano11
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows_version:
+        description: 'Windows version (e.g., 24H2, 25H2)'
+        required: false
+        default: '25H2'
+      windows_iso_url:
+        description: 'Windows 11 ISO download URL'
+        required: true
+        default: 'https://software.download.prss.microsoft.com/dbazure/Win11_25H2_English_x64.iso?t=ef9d2848-3000-43d6-a396-3364b55c9730&P1=1765525108&P2=601&P3=2&P4=oFDp5sUdqok9gEQDMSU41irY9PVdpQxWHcgBPfRqlwJQI7XH2s0FyIdmmQgpDuVYtPJidJLMbiqUwBpKJHOjaR1JovN8R5%2fpnIbXBTQymLe2LITMfb3lBmJyK0QV0DhYVTP%2fl3hFtIVYQIpnOtf5B6rR5cIB5t2r3FgX%2bbhha1Q9wcPBq%2fSg4rWBI1v60B3xd6bKEat4Y4AGOjLy9Ra7NtrAL6NKB6LeRhoiVtuCil6NVy0X3ol%2bHXgt8vxnoc3KKWLdmiOn0RYLmlAsp3ewgagUGQLUjdM%2bV19cWSkxMncaK5QuvzBCmLD00IvUxYef57YvqQJobFCz%2bc2K3jhD9w%3d%3d'
+      image_index:
+        description: 'Windows image index (1=Home, 4=Education, 6=Pro, 7=Pro N)'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '4'
+          - '6'
+          - '7'
+      language:
+        description: 'Language (e.g., English, Spanish, French)'
+        required: false
+        default: 'English'
+      skip_cleanup:
+        description: 'Skip cleanup (for debugging)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  ARIA2C_CONNECTIONS: '16'
+  ARIA2C_SPLIT: '16'
+  POWERSHELL_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  build-nano11:
+    runs-on: windows-latest
+    timeout-minutes: 500
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Generate release tag and ISO name
+        shell: powershell
+        run: |
+          $date = Get-Date -Format 'yyyy-MM-dd'
+          $version = "${{ github.event.inputs.windows_version }}"
+
+          $index = "${{ github.event.inputs.image_index }}"
+          $editions = @{
+              "1" = "Home"
+              "4" = "Education"
+              "6" = "Pro"
+              "7" = "ProN"
+          }
+          $edition = $editions[$index]
+
+          $language = "${{ github.event.inputs.language }}" -replace '[^a-zA-Z]', ''
+
+          # Generate tag and names - Nano11 specific naming
+          $folderName = "Nano11-$edition-$version"
+          $isoName = "nano11-$version-$language-$edition-$date.iso"
+
+          $baseTag = "nano11-$version-$date"
+
+          $existingTags = $(git tag -l "$baseTag*" | Measure-Object).Count
+          if ($existingTags -gt 0) {
+              $baseTag = "$baseTag-$($existingTags + 1)"
+          }
+
+          Write-Output "Generated tag: $baseTag"
+          Write-Output "Generated ISO name: $isoName"
+          Write-Output "Generated folder name: $folderName"
+
+          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_TAG=$baseTag"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_FILENAME=$isoName"
+          Add-Content -Path $env:GITHUB_ENV -Value "FOLDER_NAME=$folderName"
+
+      - name: System information
+        shell: powershell
+        run: |
+          Write-Output "=== System Information (Nano11 Build) ==="
+          Write-Output "OS: $(Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption)"
+          Write-Output "PowerShell: $($PSVersionTable.PSVersion)"
+          Write-Output "Architecture: $env:PROCESSOR_ARCHITECTURE"
+
+          $disk = Get-PSDrive C
+          $freeGB = [math]::Round($disk.Free / 1GB, 2)
+          $totalGB = [math]::Round($disk.Used / 1GB + $disk.Free / 1GB, 2)
+          Write-Output "Disk C: ${freeGB}GB free / ${totalGB}GB total"
+
+          if ($freeGB -lt 50) {
+            Write-Error "Insufficient disk space. At least 50GB required for Nano build, found ${freeGB}GB"
+            exit 1
+          }
+
+      - name: Install aria2c
+        shell: powershell
+        run: |
+          Write-Output "Installing aria2c for faster downloads..."
+          choco install aria2 -y --no-progress
+          aria2c --version
+
+      - name: Display build warnings
+        shell: powershell
+        run: |
+          Write-Output "╔════════════════════════════════════════════════════════════════╗"
+          Write-Output "║               ⚠️  NANO11 EXTREME BUILD WARNING ⚠️               ║"
+          Write-Output "╠════════════════════════════════════════════════════════════════╣"
+          Write-Output "║                                                                ║"
+          Write-Output "║  You are building the MOST AGGRESSIVE Windows 11 optimization ║"
+          Write-Output "║                                                                ║"
+          Write-Output "║  This build removes:                                           ║"
+          Write-Output "║    • Drivers (printer, scanner, tape, MFD)                     ║"
+          Write-Output "║    • Fonts (keeping only essentials)                           ║"
+          Write-Output "║    • .NET Native Images                                        ║"
+          Write-Output "║    • Input methods (CHS, CHT, JPN, KOR)                        ║"
+          Write-Output "║    • Services (Spooler, Fax, etc.)                             ║"
+          Write-Output "║    • Notepad, Paint, Photos, Camera                            ║"
+          Write-Output "║    • Everything from Core build + more                         ║"
+          Write-Output "║                                                                ║"
+          Write-Output "║  THIS IS FOR VM TESTING ONLY - NOT FOR ANY REAL USE!          ║"
+          Write-Output "║                                                                ║"
+          Write-Output "╚════════════════════════════════════════════════════════════════╝"
+          Write-Output ""
+          Write-Output "Build will continue in 15 seconds..."
+          Start-Sleep -Seconds 15
+
+      - name: Download Windows 11 ISO
+        shell: powershell
+        run: |
+          $url = "${{ github.event.inputs.windows_iso_url }}"
+          $output = "Win11_Source.iso"
+
+          Write-Output "Downloading Windows 11 ISO from Microsoft servers..."
+          Write-Output "URL: $($url.Substring(0, 100))..."
+
+          $startTime = Get-Date
+
+          aria2c `
+            --console-log-level=info `
+            --summary-interval=30 `
+            --max-connection-per-server=${{ env.ARIA2C_CONNECTIONS }} `
+            --split=${{ env.ARIA2C_SPLIT }} `
+            --min-split-size=5M `
+            --max-tries=5 `
+            --retry-wait=3 `
+            --timeout=60 `
+            --connect-timeout=30 `
+            --continue=true `
+            --allow-overwrite=true `
+            --auto-file-renaming=false `
+            --file-allocation=none `
+            --check-integrity=true `
+            --out=$output `
+            "$url"
+
+          $downloadTime = (Get-Date) - $startTime
+
+          if (-not (Test-Path $output)) {
+            Write-Error "Download failed - ISO file not found"
+            exit 1
+          }
+
+          $sizeGB = [math]::Round((Get-Item $output).Length / 1GB, 2)
+          Write-Output "Download complete: ${sizeGB}GB in $($downloadTime.TotalMinutes.ToString('F2')) minutes"
+
+      - name: Mount Windows ISO
+        shell: powershell
+        run: |
+          $isoPath = Join-Path $PWD "Win11_Source.iso"
+          Write-Output "Mounting ISO: $isoPath"
+
+          $mount = Mount-DiskImage -ImagePath $isoPath -PassThru -StorageType ISO
+
+          $maxRetries = 10
+          $retryCount = 0
+          $driveLetter = $null
+
+          while (-not $driveLetter -and $retryCount -lt $maxRetries) {
+            Start-Sleep -Seconds 5
+            try {
+              $driveInfo = Get-Volume -DiskImage $mount -ErrorAction SilentlyContinue
+              if ($driveInfo -and $driveInfo.DriveLetter) {
+                $driveLetter = $driveInfo.DriveLetter
+                Write-Output "Drive letter retrieved on attempt $($retryCount + 1): $driveLetter"
+              }
+            } catch {
+              Write-Output "Attempt $($retryCount + 1) failed: $($_.Exception.Message)"
+            }
+            $retryCount++
+          }
+
+          if (-not $driveLetter) {
+            $drive = Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object { $_.Description -eq "CD-ROM Disc" -and $_.DeviceID -ne $null }
+            if ($drive) {
+              $driveLetter = $drive.DeviceID.TrimEnd(":")
+              Write-Output "Drive letter found via WMI: $driveLetter"
+            } else {
+              Write-Error "Failed to mount ISO or retrieve drive letter"
+              exit 1
+            }
+          }
+
+          Write-Output "ISO mounted successfully at drive: ${driveLetter}:"
+
+          $requiredFiles = @(
+            "${driveLetter}:\sources\boot.wim",
+            "${driveLetter}:\sources\install.wim",
+            "${driveLetter}:\sources\install.esd"
+          )
+
+          $foundFiles = $requiredFiles | Where-Object { Test-Path $_ }
+
+          if ($foundFiles.Count -eq 0) {
+            Write-Error "No install.wim or install.esd found on mounted ISO"
+            exit 1
+          }
+
+          Write-Output "Found: $($foundFiles -join ', ')"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_DRIVE=$driveLetter"
+
+      - name: Prepare autounattend-nano.xml
+        shell: powershell
+        run: |
+          if (Test-Path "autounattend-nano.xml") {
+            Write-Output "Found local autounattend-nano.xml"
+            # The headless script will copy this to both Sysprep and ISO root
+            Write-Output "autounattend-nano.xml will be renamed to autounattend.xml during build"
+          } else {
+            Write-Error "autounattend-nano.xml not found in root!"
+            exit 1
+          }
+
+      - name: Verify headless script
+        shell: powershell
+        run: |
+          $scriptPath = ".\scripts\nano11builder-headless.ps1"
+
+          if (-not (Test-Path $scriptPath)) {
+            Write-Error "Nano11 headless script not found at $scriptPath"
+            Write-Output "Available files:"
+            Get-ChildItem -Path . -Recurse -Filter "*.ps1" | ForEach-Object { Write-Output $_.FullName }
+            exit 1
+          }
+
+          Write-Output "Nano11 headless script found: $scriptPath"
+          Write-Output "Script size: $([math]::Round((Get-Item $scriptPath).Length / 1KB, 2)) KB"
+
+      - name: Run nano11builder (headless mode)
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+
+          $params = @{
+            ISO = $env:ISO_DRIVE
+            INDEX = [int]"${{ github.event.inputs.image_index }}"
+          }
+
+          if ("${{ github.event.inputs.skip_cleanup }}" -eq "true") {
+            $params.SkipCleanup = $true
+            Write-Output "Cleanup will be skipped (debugging mode)"
+          }
+
+          Write-Output "=== Starting Nano11 Builder ==="
+          Write-Output "ISO Drive: $($params.ISO)"
+          Write-Output "Image Index: $($params.INDEX)"
+          Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+          Write-Output "⚠️  EXTREME NANO BUILD - VM TESTING ONLY!"
+
+          $startTime = Get-Date
+
+          .\scripts\nano11builder-headless.ps1 @params
+
+          $buildTime = (Get-Date) - $startTime
+          Write-Output "Nano build completed in $($buildTime.TotalMinutes.ToString('F2')) minutes"
+
+      - name: Verify nano11 ISO creation
+        shell: powershell
+        run: |
+          $tempIso = "scripts\nano11.iso"
+          $isoName = "${{ env.ISO_FILENAME }}"
+
+          if (-not (Test-Path $tempIso)) {
+            Write-Error "$tempIso was not created!"
+            Write-Output "Contents of current directory:"
+            Get-ChildItem -Path . | Format-Table Name, Length, LastWriteTime
+            Write-Output "Contents of scripts directory:"
+            Get-ChildItem -Path scripts | Format-Table Name, Length, LastWriteTime
+            exit 1
+          }
+
+          Move-Item -Path $tempIso -Destination $isoName -Force
+          Write-Output "ISO moved and renamed to: $isoName"
+
+          if (-not (Test-Path $isoName)) {
+            Write-Error "$isoName was not created!"
+            exit 1
+          }
+
+          $sizeGB = [math]::Round((Get-Item $isoName).Length / 1GB, 2)
+          Write-Output "$isoName created successfully: ${sizeGB}GB"
+
+          Write-Output "Generating checksums..."
+          $sha256 = (Get-FileHash -Path $isoName -Algorithm SHA256).Hash
+          $md5 = (Get-FileHash -Path $isoName -Algorithm MD5).Hash
+
+          "$sha256  $isoName" | Out-File -FilePath "$isoName.sha256" -Encoding ASCII
+          "$md5  $isoName" | Out-File -FilePath "$isoName.md5" -Encoding ASCII
+
+          $verificationInfo = @"
+          Nano11 ISO Verification
+          =======================
+          File: $isoName
+          Size: ${sizeGB}GB
+          Build Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+          Image Index: ${{ github.event.inputs.image_index }}
+          Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          BUILD TYPE: NANO11 (EXTREME MINIMAL - Testing Only!)
+
+          SHA256: $sha256
+          MD5: $md5
+
+          Removed Components:
+            - Drivers (printer, scanner, tape, MFD)
+            - Fonts (most non-essential)
+            - .NET Native Images
+            - Input methods (CJK)
+            - Services (Spooler, Fax, etc.)
+            - Additional apps (Notepad, Paint, Photos, Camera)
+            - All Core build removals
+
+          ⚠️ THIS BUILD IS FOR VM TESTING ONLY
+          "@
+
+          $verificationInfo | Out-File -FilePath "$isoName.txt" -Encoding UTF8
+
+          Write-Output ""
+          Write-Output "=== NANO11 BUILD SUMMARY ==="
+          Write-Output "Build completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+          Write-Output "Output size: ${sizeGB}GB"
+          Write-Output "SHA256: $sha256"
+
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_NAME=$isoName"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_SIZE_GB=$sizeGB"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_SHA256=$sha256"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_MD5=$md5"
+
+      - name: Cleanup before upload
+        shell: powershell
+        run: |
+          Write-Output "Cleaning up to free disk space..."
+
+          $isoPath = Join-Path $PWD "Win11_Source.iso"
+          if (Test-Path $isoPath) {
+            Get-DiskImage -ImagePath $isoPath | Dismount-DiskImage -ErrorAction SilentlyContinue
+            Write-Output "ISO unmounted"
+          }
+
+          Remove-Item "Win11_Source.iso" -Force -ErrorAction SilentlyContinue
+          Get-ChildItem -Path . -Filter "*.log" | Where-Object { $_.Length -gt 10MB } | Remove-Item -Force
+
+          $disk = Get-PSDrive C
+          $freeGB = [math]::Round($disk.Free / 1GB, 2)
+          Write-Output "Available space after cleanup: ${freeGB}GB"
+
+      - name: Check upload configuration
+        id: check-upload
+        shell: powershell
+        env:
+          SF_KEY: ${{ secrets.SF_SSH_KEY }}
+          ENABLE_UPLOAD: ${{ vars.ENABLE_SOURCEFORGE_UPLOAD }}
+        run: |
+          if ($env:ENABLE_UPLOAD -eq 'true' -or -not [string]::IsNullOrWhiteSpace($env:SF_KEY)) {
+            Write-Output "Upload condition met."
+            "DO_UPLOAD=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
+          } else {
+            Write-Output "Upload condition NOT met. Fallback to artifacts."
+            "DO_UPLOAD=false" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
+          }
+
+      - name: Validate SourceForge credentials
+        if: env.DO_UPLOAD == 'true'
+        env:
+          SF_SSH_KEY: ${{ secrets.SF_SSH_KEY }}
+          SF_USERNAME: ${{ secrets.SF_USERNAME }}
+        shell: powershell
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SF_SSH_KEY)) {
+            Write-Error "SF_SSH_KEY secret is not configured"
+            exit 1
+          }
+          if ([string]::IsNullOrWhiteSpace($env:SF_USERNAME)) {
+            Write-Error "SF_USERNAME secret is not configured"
+            exit 1
+          }
+          Write-Output "Credentials validated successfully"
+          
+      - name: Setup SSH for SourceForge
+        if: env.DO_UPLOAD == 'true'
+        shell: powershell
+        env:
+          SF_PROJECT: ${{ secrets.SF_PROJECT }}
+          SF_SSH_KEY: ${{ secrets.SF_SSH_KEY }}
+          SF_USERNAME: ${{ secrets.SF_USERNAME }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SF_SSH_KEY)) { Write-Error "Secret SF_SSH_KEY is missing"; exit 1 }
+          
+          if ([string]::IsNullOrWhiteSpace($env:SF_PROJECT)) {
+            $env:SF_PROJECT = "${{ github.event.repository.name }}"
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "SF_PROJECT=$env:SF_PROJECT"
+          
+          $sshDir = "$env:USERPROFILE\.ssh"
+          if (!(Test-Path $sshDir)) { New-Item -ItemType Directory -Force -Path $sshDir | Out-Null }
+          
+          $keyPath = "$sshDir\sf_key"
+          
+          try {
+            $keyBytes = [System.Convert]::FromBase64String($env:SF_SSH_KEY)
+            [System.IO.File]::WriteAllBytes($keyPath, $keyBytes)
+          } catch {
+            Write-Error "Failed to decode SF_SSH_KEY. Did you Base64 encode it first?"
+            exit 1
+          }
+          
+          icacls $keyPath /c /t /inheritance:d
+          icacls $keyPath /c /t /grant "${env:USERNAME}:F"
+          icacls $keyPath /c /t /remove Administrator "Authenticated Users" BUILTIN\Administrators BUILTIN\Users
+          
+          ssh-keyscan -t rsa,ecdsa,ed25519 frs.sourceforge.net | Out-File -FilePath "$sshDir\known_hosts" -Encoding ascii
+          
+          Write-Output "SSH configuration complete."
+
+      - name: Upload to SourceForge
+        if: env.DO_UPLOAD == 'true'
+        shell: powershell
+        env:
+          SF_USERNAME: ${{ secrets.SF_USERNAME }}
+          SF_PROJECT: ${{ secrets.SF_PROJECT }}
+          ISO_NAME: ${{ env.ISO_NAME }}
+          FOLDER_NAME: ${{ env.FOLDER_NAME }}
+        run: |
+          $keyPath = "$env:USERPROFILE\.ssh\sf_key"
+
+          Write-Output "Organizing files into folder: $env:FOLDER_NAME"
+          New-Item -ItemType Directory -Force -Path $env:FOLDER_NAME | Out-Null
+
+          Copy-Item $env:ISO_NAME $env:FOLDER_NAME
+          Copy-Item "$env:ISO_NAME.sha256" $env:FOLDER_NAME
+          Copy-Item "$env:ISO_NAME.md5" $env:FOLDER_NAME
+          Copy-Item "$env:ISO_NAME.txt" $env:FOLDER_NAME
+
+          if (Test-Path "SOURCEFORGE_README.md") {
+            Copy-Item "SOURCEFORGE_README.md" $env:FOLDER_NAME
+            Write-Output "Copied SOURCEFORGE_README.md to folder"
+          }
+
+          $remoteRoot = "$env:SF_USERNAME@frs.sourceforge.net:/home/frs/project/$env:SF_PROJECT/"
+
+          Write-Output "Uploading folder..."
+          scp -i $keyPath -r -o StrictHostKeyChecking=no $env:FOLDER_NAME $remoteRoot
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "SCP Upload failed"
+            exit 1
+          }
+          Write-Output "Upload success!"
+
+          $downloadUrl = "https://sourceforge.net/projects/$env:SF_PROJECT/files/$env:RELEASE_TAG/$env:ISO_NAME/download"
+          Add-Content -Path $env:GITHUB_ENV -Value "SF_DOWNLOAD_URL=$downloadUrl"
+          
+      - name: Cleanup SSH credentials
+        if: always()
+        shell: powershell
+        run: |
+          $keyPath = "$env:USERPROFILE\.ssh\sf_key"
+          if (Test-Path $keyPath) {
+            Remove-Item $keyPath -Force -ErrorAction SilentlyContinue
+            Write-Output "SSH key cleaned up"
+          }
+          
+      - name: Upload ISO as artifact (fallback)
+        if: env.DO_UPLOAD != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ISO_NAME }}
+          path: |
+            ${{ env.ISO_NAME }}
+            ${{ env.ISO_NAME }}.sha256
+            ${{ env.ISO_NAME }}.md5
+            ${{ env.ISO_NAME }}.txt
+          retention-days: 7
+          compression-level: 0
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Nano11 Windows 11 ${{ github.event.inputs.windows_version }} - ${{ env.RELEASE_TAG }}
+          body: |
+            ## 🔥 Nano11 Windows 11 ${{ github.event.inputs.windows_version }} Build
+
+            **⚠️ EXTREME MINIMAL BUILD - FOR VM TESTING ONLY ⚠️**
+
+            ### 📦 Build Information
+            - **Built with:** [nano11builder](https://github.com/kelexine/tiny11-automated)
+            - **Author:** [kelexine](https://github.com/kelexine)
+            - **Build Date:** ${{ github.event.repository.updated_at }}
+            - **Workflow Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            ### 📥 Download
+            ${{ secrets.SF_SSH_KEY != '' && format('**SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || '**GitHub Artifacts:** Check workflow run for download' }}
+
+            ### 💿 Image Details
+            | Property | Value |
+            |----------|-------|
+            | **File** | ${{ env.ISO_NAME }} |
+            | **Size** | ${{ env.ISO_SIZE_GB }}GB |
+            | **Type** | Nano (EXTREME Minimal) |
+            | **Base** | Windows 11 ${{ github.event.inputs.windows_version }} |
+            | **Index** | ${{ github.event.inputs.image_index }} |
+            | **Language** | ${{ github.event.inputs.language }} |
+
+            ### 🔒 Checksums
+
+            **SHA256:**
+            ```
+            ${{ env.ISO_SHA256 }}
+            ```
+
+            **MD5:**
+            ```
+            ${{ env.ISO_MD5 }}
+            ```
+
+            ### 💣 What's Removed (Beyond Core)
+            - **Driver packages** (printer, scanner, MFD, tape)
+            - **Fonts** (keeping only Segoe, Arial, Calibri, Times)
+            - **.NET Native Images** (pre-compiled assemblies)
+            - **Input methods** (Chinese, Japanese, Korean)
+            - **Services** (Spooler, PrintNotify, Fax, RemoteRegistry, etc.)
+            - **Additional apps** (Notepad, Paint, Photos, Camera)
+            - Plus everything from Tiny11 Core
+
+            ### ⚠️ Extreme Limitations
+            - ❌ **NO Printing** - Spooler service removed
+            - ❌ **NO Notepad/Paint** - Basic apps removed
+            - ❌ **NO Photos app** - Use file explorer only
+            - ❌ **NO CJK Input** - Chinese/Japanese/Korean removed
+            - ❌ **MINIMAL fonts** - Only essential Western fonts
+            - ❌ All Core limitations apply
+
+            ### ✅ Use Cases
+            - ✅ Rapid VM testing
+            - ✅ Smallest possible Windows 11 footprint
+            - ✅ Experimental environments
+            - ✅ Disposable Windows instances
+
+            ---
+
+            **⚠️ Disclaimer:** DO NOT USE FOR ANY REAL PURPOSE. This is a heavily modified Windows 11 for testing only.
+
+            **📜 License:** Educational purposes only. Requires valid Windows license.
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            ${{ env.ISO_NAME }}.sha256
+            ${{ env.ISO_NAME }}.md5
+            ${{ env.ISO_NAME }}.txt
+          
+      - name: Workflow summary
+        shell: powershell
+        run: |
+          $summary = @"
+          # 🔥 Nano11 Build Completed Successfully
+
+          ## 📦 Build Information
+          - **ISO:** $env:ISO_NAME
+          - **Size:** $env:ISO_SIZE_GB GB
+          - **Release:** ${{ env.RELEASE_TAG }}
+          - **Version:** ${{ github.event.inputs.windows_version }}
+          - **Type:** Nano (EXTREME Minimal)
+
+          ## 📥 Download
+          ${{ secrets.SF_SSH_KEY != '' && format('🔗 **SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || '🔗 **GitHub Artifacts:** Available in workflow run' }}
+
+          ## 🔒 Checksums
+          **SHA256:** ``````
+          $env:ISO_SHA256
+          ``````
+
+          **MD5:** ``````
+          $env:ISO_MD5
+          ``````
+
+          ## ⚠️ EXTREME Warnings
+          - ❌ NO Printing capability
+          - ❌ NO Notepad, Paint, Photos
+          - ❌ NO CJK input methods
+          - ❌ Minimal fonts only
+          - ❌ VM TESTING ONLY
+
+          ## ⏱️ Build Time
+          Completed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+
+          ---
+          Built by [kelexine](https://github.com/kelexine) | Based on [ntdevlabs/tiny11builder](https://github.com/ntdevlabs/tiny11builder)
+          "@
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary

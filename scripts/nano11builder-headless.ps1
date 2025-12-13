@@ -1,18 +1,11 @@
 <#
 .SYNOPSIS
-    Headless script to build a minimized Windows 11 Core image for CI/CD automation.
+    Headless script to build a minimized Windows 11 Nano image for CI/CD automation.
 
 .DESCRIPTION
-    Automated build of an extremely streamlined Windows 11 Core image without user interaction.
-    This script generates a significantly reduced Windows 11 image by removing WinSxS components,
-    Windows Recovery Environment, and additional system packages.
-
-    WARNING: tiny11 Core is not suitable for regular use due to its lack of serviceability -
-    you cannot add languages, updates, or features post-creation. It's designed for rapid
-    testing or development in VM environments.
-
-    Designed for GitHub Actions workflows and other CI/CD pipelines.
-    Uses only Microsoft utilities like DISM, with oscdimg.exe from Windows ADK.
+    Automated build of an extremely streamlined Windows 11 Nano image without user interaction.
+    This is the most aggressive Windows 11 optimization, removing drivers, fonts, services,
+    and more. NOT suitable for any regular use - designed for rapid testing in VMs only.
 
 .PARAMETER ISO
     Drive letter of the mounted Windows 11 ISO (required, e.g., E)
@@ -27,14 +20,14 @@
     Skip cleanup of temporary files after ISO creation (optional, for debugging)
 
 .EXAMPLE
-    .\tiny11coremaker-headless.ps1 -ISO E -INDEX 1
-    .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -SCRATCH D -SkipCleanup
+    .\nano11builder-headless.ps1 -ISO E -INDEX 1
+    .\nano11builder-headless.ps1 -ISO E -INDEX 6 -SCRATCH D -SkipCleanup
 
 .NOTES
     Original Author: ntdevlabs
     Modified by: kelexine (https://github.com/kelexine)
     GitHub: https://github.com/kelexine/tiny11-automated
-    Date: 2025-12-08
+    Date: 2025-12-13
 
     License: MIT
     This is a headless automation-ready version designed for CI/CD pipelines.
@@ -56,17 +49,14 @@ param (
     [string]$SCRATCH,
 
     [Parameter(Mandatory=$false, HelpMessage="Skip cleanup of temporary files")]
-    [switch]$SkipCleanup,
-
-    [Parameter(Mandatory=$false, HelpMessage="Enable .NET Framework 3.5")]
-    [switch]$ENABLE_DOTNET35
+    [switch]$SkipCleanup
 )
 
-#---------[ Error Handling ]---------
+#---------[ Error Handling ]---------#
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-#---------[ Configuration ]---------
+#---------[ Configuration ]---------#
 if (-not $SCRATCH) {
     $ScratchDisk = $PSScriptRoot -replace '[\\]+$', ''
 } else {
@@ -74,11 +64,11 @@ if (-not $SCRATCH) {
 }
 
 $DriveLetter = $ISO + ":"
-$wimFilePath = "$ScratchDisk\tiny11\sources\install.wim"
+$wimFilePath = "$ScratchDisk\nano11\sources\install.wim"
 $scratchDir = "$ScratchDisk\scratchdir"
-$tiny11Dir = "$ScratchDisk\tiny11"
-$outputISO = "$PSScriptRoot\tiny11-core.iso"
-$logFile = "$PSScriptRoot\tiny11-core_$(Get-Date -Format yyyyMMdd_HHmmss).log"
+$nano11Dir = "$ScratchDisk\nano11"
+$outputISO = "$PSScriptRoot\nano11.iso"
+$logFile = "$PSScriptRoot\nano11_$(Get-Date -Format yyyyMMdd_HHmmss).log"
 
 # Initialize admin identifiers for permission operations
 try {
@@ -89,7 +79,7 @@ try {
     $adminGroup = [PSCustomObject]@{ Value = "Administrators" }
 }
 
-#---------[ Functions ]---------
+#---------[ Helper Functions ]---------#
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -98,6 +88,32 @@ function Write-Log {
     Add-Content -Path $logFile -Value $logMessage -ErrorAction SilentlyContinue
 }
 
+function Set-RegistryValue {
+    param (
+        [string]$path,
+        [string]$name,
+        [string]$type,
+        [string]$value
+    )
+    try {
+        & 'reg' 'add' $path '/v' $name '/t' $type '/d' $value '/f' | Out-Null
+        Write-Log "Set registry: $path\$name = $value"
+    } catch {
+        Write-Log "Error setting registry $path\$name : $_" "WARN"
+    }
+}
+
+function Remove-RegistryKey {
+    param([string]$path)
+    try {
+        & 'reg' 'delete' $path '/f' 2>&1 | Out-Null
+        Write-Log "Removed registry key: $path"
+    } catch {
+        Write-Log "Registry key not found or error: $path" "WARN"
+    }
+}
+
+#---------[ Core Functions ]---------#
 function Test-Prerequisites {
     Write-Log "Checking prerequisites..."
 
@@ -123,13 +139,13 @@ function Test-Prerequisites {
         throw "Windows installation files not found"
     }
 
-    # Check disk space (minimum 20GB recommended for Core build)
+    # Check disk space (minimum 30GB recommended for Nano build)
     $disk = Get-PSDrive -Name $ScratchDisk[0] -ErrorAction SilentlyContinue
     if ($disk) {
         $freeGB = [math]::Round($disk.Free / 1GB, 2)
         Write-Log "Available space on ${ScratchDisk}: ${freeGB}GB"
-        if ($freeGB -lt 20) {
-            Write-Log "Low disk space warning: ${freeGB}GB (20GB+ recommended for Core build)" "WARN"
+        if ($freeGB -lt 30) {
+            Write-Log "Low disk space warning: ${freeGB}GB (30GB+ recommended for Nano build)" "WARN"
         }
     }
 
@@ -138,7 +154,7 @@ function Test-Prerequisites {
 
 function Initialize-Directories {
     Write-Log "Initializing directories..."
-    New-Item -ItemType Directory -Force -Path "$tiny11Dir\sources" | Out-Null
+    New-Item -ItemType Directory -Force -Path "$nano11Dir\sources" | Out-Null
     New-Item -ItemType Directory -Force -Path $scratchDir | Out-Null
     Write-Log "Directories created"
 }
@@ -147,7 +163,7 @@ function Convert-ESDToWIM {
     Write-Log "Converting install.esd to install.wim..."
 
     $esdPath = "$DriveLetter\sources\install.esd"
-    $tempWimPath = "$tiny11Dir\sources\install.wim"
+    $tempWimPath = "$nano11Dir\sources\install.wim"
 
     # Validate index exists in ESD
     $images = Get-WindowsImage -ImagePath $esdPath
@@ -167,12 +183,11 @@ function Convert-ESDToWIM {
 
 function Copy-WindowsFiles {
     Write-Log "Copying Windows installation files from $DriveLetter..."
-    Copy-Item -Path "$DriveLetter\*" -Destination $tiny11Dir -Recurse -Force -ErrorAction SilentlyContinue
+    Copy-Item -Path "$DriveLetter\*" -Destination $nano11Dir -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Remove read-only attribute and delete install.esd if present
-    if (Test-Path "$tiny11Dir\sources\install.esd") {
-        Set-ItemProperty -Path "$tiny11Dir\sources\install.esd" -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
-        Remove-Item "$tiny11Dir\sources\install.esd" -Force -ErrorAction SilentlyContinue
+    # Remove install.esd if present
+    if (Test-Path "$nano11Dir\sources\install.esd") {
+        Remove-Item "$nano11Dir\sources\install.esd" -Force -ErrorAction SilentlyContinue
     }
 
     Write-Log "File copy complete"
@@ -203,8 +218,52 @@ function Mount-WindowsImageFile {
 
     Set-ItemProperty -Path $wimFilePath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
 
-    Mount-WindowsImage -ImagePath $wimFilePath -Index $INDEX -Path $scratchDir
+    & dism /English "/mount-image" "/imagefile:$wimFilePath" "/index:$INDEX" "/mountdir:$scratchDir"
     Write-Log "Image mounted at $scratchDir"
+}
+
+function Take-OwnershipOfFolders {
+    Write-Log "Taking ownership of critical folders..."
+    
+    $foldersToOwn = @(
+        "$scratchDir\Windows\System32\DriverStore\FileRepository",
+        "$scratchDir\Windows\Fonts",
+        "$scratchDir\Windows\Web",
+        "$scratchDir\Windows\Help",
+        "$scratchDir\Windows\Cursors",
+        "$scratchDir\Program Files (x86)\Microsoft",
+        "$scratchDir\Program Files\WindowsApps",
+        "$scratchDir\Windows\System32\Microsoft-Edge-Webview",
+        "$scratchDir\Windows\System32\Recovery",
+        "$scratchDir\Windows\WinSxS",
+        "$scratchDir\Windows\assembly",
+        "$scratchDir\ProgramData\Microsoft\Windows Defender",
+        "$scratchDir\Windows\System32\InputMethod",
+        "$scratchDir\Windows\Speech",
+        "$scratchDir\Windows\Temp"
+    )
+    
+    $filesToOwn = @(
+        "$scratchDir\Windows\System32\OneDriveSetup.exe"
+    )
+    
+    foreach ($folder in $foldersToOwn) {
+        if (Test-Path $folder) {
+            Write-Log "Taking ownership: $folder"
+            & takeown.exe /F $folder /R /D Y 2>&1 | Out-Null
+            & icacls.exe $folder /grant "$($adminGroup.Value):(F)" /T /C 2>&1 | Out-Null
+        }
+    }
+    
+    foreach ($file in $filesToOwn) {
+        if (Test-Path $file) {
+            Write-Log "Taking ownership: $file"
+            & takeown.exe /F $file /D Y 2>&1 | Out-Null
+            & icacls.exe $file /grant "$($adminGroup.Value):(F)" /C 2>&1 | Out-Null
+        }
+    }
+    
+    Write-Log "Ownership taken"
 }
 
 function Get-ImageMetadata {
@@ -218,7 +277,7 @@ function Get-ImageMetadata {
         $script:languageCode = $Matches[1]
         Write-Log "Language: $script:languageCode"
     } else {
-        Write-Log "Language code not found, using default patterns" "WARN"
+        Write-Log "Language code not found, using default" "WARN"
         $script:languageCode = "en-US"
     }
 
@@ -243,103 +302,132 @@ function Get-ImageMetadata {
     }
 }
 
+#---------[ Nano11-Specific Removal Functions ]---------#
 function Remove-BloatwareApps {
-    Write-Log "Removing provisioned appx packages..."
+    Write-Log "Removing provisioned appx packages (extended nano11 list)..."
 
-    $packages = & dism /English "/image:$scratchDir" /Get-ProvisionedAppxPackages |
-        ForEach-Object {
-            if ($_ -match 'PackageName : (.*)') {
-                $matches[1]
-            }
-        }
-
-    $packagePrefixes = @(
-        'Clipchamp.Clipchamp_',
-        'Microsoft.BingNews_',
-        'Microsoft.BingWeather_',
-        'Microsoft.GamingApp_',
-        'Microsoft.GetHelp_',
-        'Microsoft.Getstarted_',
-        'Microsoft.MicrosoftOfficeHub_',
-        'Microsoft.MicrosoftSolitaireCollection_',
-        'Microsoft.People_',
-        'Microsoft.PowerAutomateDesktop_',
-        'Microsoft.Todos_',
-        'Microsoft.WindowsAlarms_',
-        'microsoft.windowscommunicationsapps_',
-        'Microsoft.WindowsFeedbackHub_',
-        'Microsoft.WindowsMaps_',
-        'Microsoft.WindowsSoundRecorder_',
-        'Microsoft.Xbox.TCUI_',
-        'Microsoft.XboxGamingOverlay_',
-        'Microsoft.XboxGameOverlay_',
-        'Microsoft.XboxSpeechToTextOverlay_',
-        'Microsoft.YourPhone_',
-        'Microsoft.ZuneMusic_',
-        'Microsoft.ZuneVideo_',
-        'MicrosoftCorporationII.MicrosoftFamily_',
-        'MicrosoftCorporationII.QuickAssist_',
-        'MicrosoftTeams_',
-        'Microsoft.549981C3F5F10_',
-        'Microsoft.Windows.Copilot',
-        'MSTeams_',
-        'Microsoft.OutlookForWindows_',
-        'Microsoft.Windows.Teams_',
-        'Microsoft.Copilot_'
-    )
-
-    $packagesToRemove = $packages | Where-Object {
-        $packageName = $_
-        $packagePrefixes | Where-Object { $packageName -like "$_*" }
+    $packagesToRemove = Get-AppxProvisionedPackage -Path $scratchDir | Where-Object {
+        $_.PackageName -like '*Zune*' -or
+        $_.PackageName -like '*Bing*' -or
+        $_.PackageName -like '*Clipchamp*' -or
+        $_.PackageName -like '*Gaming*' -or
+        $_.PackageName -like '*People*' -or
+        $_.PackageName -like '*PowerAutomate*' -or
+        $_.PackageName -like '*Teams*' -or
+        $_.PackageName -like '*Todos*' -or
+        $_.PackageName -like '*YourPhone*' -or
+        $_.PackageName -like '*SoundRecorder*' -or
+        $_.PackageName -like '*Solitaire*' -or
+        $_.PackageName -like '*FeedbackHub*' -or
+        $_.PackageName -like '*Maps*' -or
+        $_.PackageName -like '*OfficeHub*' -or
+        $_.PackageName -like '*Help*' -or
+        $_.PackageName -like '*Family*' -or
+        $_.PackageName -like '*Alarms*' -or
+        $_.PackageName -like '*CommunicationsApps*' -or
+        $_.PackageName -like '*Copilot*' -or
+        $_.PackageName -like '*CompatibilityEnhancements*' -or
+        $_.PackageName -like '*AV1VideoExtension*' -or
+        $_.PackageName -like '*AVCEncoderVideoExtension*' -or
+        $_.PackageName -like '*HEIFImageExtension*' -or
+        $_.PackageName -like '*HEVCVideoExtension*' -or
+        $_.PackageName -like '*MicrosoftStickyNotes*' -or
+        $_.PackageName -like '*OutlookForWindows*' -or
+        $_.PackageName -like '*RawImageExtension*' -or
+        $_.PackageName -like '*SecHealthUI*' -or
+        $_.PackageName -like '*VP9VideoExtensions*' -or
+        $_.PackageName -like '*WebpImageExtension*' -or
+        $_.PackageName -like '*DevHome*' -or
+        $_.PackageName -like '*Photos*' -or
+        $_.PackageName -like '*Camera*' -or
+        $_.PackageName -like '*QuickAssist*' -or
+        $_.PackageName -like '*CoreAI*' -or
+        $_.PackageName -like '*PeopleExperienceHost*' -or
+        $_.PackageName -like '*PinningConfirmationDialog*' -or
+        $_.PackageName -like '*SecureAssessmentBrowser*' -or
+        $_.PackageName -like '*Paint*' -or
+        $_.PackageName -like '*Notepad*'
     }
 
     $removeCount = 0
     foreach ($package in $packagesToRemove) {
-        Write-Log "Removing: $package"
-        & dism /English "/image:$scratchDir" /Remove-ProvisionedAppxPackage "/PackageName:$package" | Out-Null
+        Write-Log "Removing: $($package.DisplayName)"
+        Remove-AppxProvisionedPackage -Path $scratchDir -PackageName $package.PackageName -ErrorAction SilentlyContinue
         $removeCount++
+    }
+
+    # Clean up leftover WindowsApps folders
+    Write-Log "Cleaning leftover WindowsApps folders..."
+    foreach ($package in $packagesToRemove) {
+        $folderPath = Join-Path "$scratchDir\Program Files\WindowsApps" $package.PackageName
+        if (Test-Path $folderPath) {
+            Remove-Item $folderPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     Write-Log "Removed $removeCount appx packages"
 }
 
 function Remove-SystemPackages {
-    Write-Log "Removing system packages..."
+    Write-Log "Removing system packages (extended nano11 list)..."
 
     $packagePatterns = @(
-        "Microsoft-Windows-InternetExplorer-Optional-Package~31bf3856ad364e35",
-        "Microsoft-Windows-Kernel-LA57-FoD-Package~31bf3856ad364e35~amd64",
-        "Microsoft-Windows-LanguageFeatures-Handwriting-$($script:languageCode)-Package~31bf3856ad364e35",
-        "Microsoft-Windows-LanguageFeatures-OCR-$($script:languageCode)-Package~31bf3856ad364e35",
-        "Microsoft-Windows-LanguageFeatures-Speech-$($script:languageCode)-Package~31bf3856ad364e35",
-        "Microsoft-Windows-LanguageFeatures-TextToSpeech-$($script:languageCode)-Package~31bf3856ad364e35",
-        "Microsoft-Windows-MediaPlayer-Package~31bf3856ad364e35",
-        "Microsoft-Windows-Wallpaper-Content-Extended-FoD-Package~31bf3856ad364e35",
-        "Windows-Defender-Client-Package~31bf3856ad364e35~",
+        # Legacy Components & Optional Apps
+        "Microsoft-Windows-InternetExplorer-Optional-Package~",
+        "Microsoft-Windows-MediaPlayer-Package~",
         "Microsoft-Windows-WordPad-FoD-Package~",
+        "Microsoft-Windows-StepsRecorder-Package~",
+        "Microsoft-Windows-MSPaint-FoD-Package~",
+        "Microsoft-Windows-SnippingTool-FoD-Package~",
         "Microsoft-Windows-TabletPCMath-Package~",
-        "Microsoft-Windows-StepsRecorder-Package~"
+        "Microsoft-Windows-Xps-Xps-Viewer-Opt-Package~",
+        "Microsoft-Windows-PowerShell-ISE-FOD-Package~",
+        "OpenSSH-Client-Package~",
+        
+        # Language & Input Features
+        "Microsoft-Windows-LanguageFeatures-Handwriting-$($script:languageCode)-Package~",
+        "Microsoft-Windows-LanguageFeatures-OCR-$($script:languageCode)-Package~",
+        "Microsoft-Windows-LanguageFeatures-Speech-$($script:languageCode)-Package~",
+        "Microsoft-Windows-LanguageFeatures-TextToSpeech-$($script:languageCode)-Package~",
+        "*IME-ja-jp*",
+        "*IME-ko-kr*",
+        "*IME-zh-cn*",
+        "*IME-zh-tw*",
+        
+        # Core OS Features
+        "Windows-Defender-Client-Package~",
+        "Microsoft-Windows-Search-Engine-Client-Package~",
+        "Microsoft-Windows-Kernel-LA57-FoD-Package~",
+        
+        # Security & Identity
+        "Microsoft-Windows-Hello-Face-Package~",
+        "Microsoft-Windows-Hello-BioEnrollment-Package~",
+        "Microsoft-Windows-BitLocker-DriveEncryption-FVE-Package~",
+        "Microsoft-Windows-TPM-WMI-Provider-Package~",
+        
+        # Accessibility Tools
+        "Microsoft-Windows-Narrator-App-Package~",
+        "Microsoft-Windows-Magnifier-App-Package~",
+        
+        # Miscellaneous Features
+        "Microsoft-Windows-Printing-PMCPPC-FoD-Package~",
+        "Microsoft-Windows-WebcamExperience-Package~",
+        "Microsoft-Media-MPEG2-Decoder-Package~",
+        "Microsoft-Windows-Wallpaper-Content-Extended-FoD-Package~"
     )
 
-    # Get all packages
     $allPackages = & dism /image:$scratchDir /Get-Packages /Format:Table
     $allPackages = $allPackages -split "`n" | Select-Object -Skip 1
 
     $removeCount = 0
     foreach ($packagePattern in $packagePatterns) {
-        # Filter the packages to remove
         $packagesToRemove = $allPackages | Where-Object { $_ -like "$packagePattern*" }
-
         foreach ($package in $packagesToRemove) {
-            # Extract the package identity
             $packageIdentity = ($package -split "\s+")[0]
-
-            Write-Log "Removing $packageIdentity..."
-            try {
-                & dism /image:$scratchDir /Remove-Package /PackageName:$packageIdentity /Quiet /NoRestart | Out-Null
+            if ($packageIdentity) {
+                Write-Log "Removing package: $packageIdentity"
+                & dism /image:$scratchDir /Remove-Package /PackageName:$packageIdentity /Quiet /NoRestart 2>&1 | Out-Null
                 $removeCount++
-            } catch {
-                Write-Log "Failed to remove $packageIdentity : $_" "WARN"
             }
         }
     }
@@ -347,63 +435,138 @@ function Remove-SystemPackages {
     Write-Log "Removed $removeCount system packages"
 }
 
-function Remove-EdgeAndOneDrive {
-    Write-Log "Removing Microsoft Edge..."
+function Remove-NativeImages {
+    Write-Log "Removing pre-compiled .NET assemblies (Native Images)..."
+    $nativeImagesPath = "$scratchDir\Windows\assembly\NativeImages_*"
+    Remove-Item -Path $nativeImagesPath -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Log ".NET Native Images removed"
+}
 
-    $edgePaths = @(
-        "$scratchDir\Program Files (x86)\Microsoft\Edge",
-        "$scratchDir\Program Files (x86)\Microsoft\EdgeUpdate",
-        "$scratchDir\Program Files (x86)\Microsoft\EdgeCore",
-        "$scratchDir\Windows\System32\Microsoft-Edge-Webview"
+function Slim-DriverStore {
+    Write-Log "Slimming the DriverStore (removing non-essential driver classes)..."
+    
+    $driverRepo = "$scratchDir\Windows\System32\DriverStore\FileRepository"
+    $patternsToRemove = @(
+        'prn*',      # Printer drivers
+        'scan*',     # Scanner drivers
+        'mfd*',      # Multi-function device drivers
+        'wscsmd.inf*', # Smartcard readers
+        'tapdrv*',   # Tape drives
+        'rdpbus.inf*', # Remote Desktop virtual bus
+        'tdibth.inf*'  # Bluetooth Personal Area Network
     )
 
-    foreach ($path in $edgePaths) {
+    $removeCount = 0
+    Get-ChildItem -Path $driverRepo -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        $driverFolder = $_.Name
+        foreach ($pattern in $patternsToRemove) {
+            if ($driverFolder -like $pattern) {
+                Write-Log "Removing driver: $driverFolder"
+                Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                $removeCount++
+                break
+            }
+        }
+    }
+
+    Write-Log "Removed $removeCount driver packages"
+}
+
+function Reduce-Fonts {
+    Write-Log "Reducing fonts (keeping only essentials)..."
+    
+    $fontsPath = "$scratchDir\Windows\Fonts"
+    if (Test-Path $fontsPath) {
+        # Keep essential fonts, remove the rest
+        Get-ChildItem -Path $fontsPath -Exclude "segoe*.*", "tahoma*.*", "marlett.ttf", "8541oem.fon", "segui*.*", "consol*.*", "lucon*.*", "calibri*.*", "arial*.*", "times*.*", "cou*.*", "8*.*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        
+        # Remove CJK fonts explicitly
+        Get-ChildItem -Path $fontsPath -Include "mingli*", "msjh*", "msyh*", "malgun*", "meiryo*", "yugoth*", "segoeuihistoric.ttf" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Log "Fonts reduced"
+}
+
+function Clean-InputMethods {
+    Write-Log "Cleaning input methods (removing CJK)..."
+    
+    $inputMethodPaths = @(
+        "$scratchDir\Windows\System32\InputMethod\CHS",
+        "$scratchDir\Windows\System32\InputMethod\CHT",
+        "$scratchDir\Windows\System32\InputMethod\JPN",
+        "$scratchDir\Windows\System32\InputMethod\KOR"
+    )
+
+    foreach ($path in $inputMethodPaths) {
         if (Test-Path $path) {
-            & takeown /f $path /r /a | Out-Null
-            & icacls $path /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
             Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
-    Write-Log "Removing OneDrive..."
-    $oneDrivePath = "$scratchDir\Windows\System32\OneDriveSetup.exe"
-    if (Test-Path $oneDrivePath) {
-        & takeown /f $oneDrivePath /a | Out-Null
-        & icacls $oneDrivePath /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
-        Remove-Item -Path $oneDrivePath -Force -ErrorAction SilentlyContinue
-    }
+    Write-Log "Input methods cleaned"
+}
 
-    Write-Log "Edge and OneDrive removal complete"
+function Remove-MiscellaneousFiles {
+    Write-Log "Performing aggressive file deletions..."
+    
+    # Speech TTS
+    Remove-Item -Path "$scratchDir\Windows\Speech\Engines\TTS" -Recurse -Force -ErrorAction SilentlyContinue
+    
+    # Defender definitions
+    Remove-Item -Path "$scratchDir\ProgramData\Microsoft\Windows Defender\Definition Updates" -Recurse -Force -ErrorAction SilentlyContinue
+    
+    # Temp files
+    Remove-Item -Path "$scratchDir\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+    
+    # Web, Help, Cursors
+    Remove-Item -Path "$scratchDir\Windows\Web" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$scratchDir\Windows\Help" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$scratchDir\Windows\Cursors" -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-Log "Miscellaneous files removed"
+}
+
+function Remove-EdgeAndOneDrive {
+    Write-Log "Removing Microsoft Edge and OneDrive..."
+
+    # Remove Edge paths
+    Remove-Item -Path "$scratchDir\Program Files (x86)\Microsoft\Edge*" -Recurse -Force -ErrorAction SilentlyContinue
+    
+    # Remove Edge WebView from WinSxS
+    if ($script:architecture -eq 'amd64') {
+        $folderPath = Get-ChildItem -Path "$scratchDir\Windows\WinSxS" -Filter "amd64_microsoft-edge-webview_31bf3856ad364e35*" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+        if ($folderPath) {
+            Remove-Item -Path $folderPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    
+    Remove-Item -Path "$scratchDir\Windows\System32\Microsoft-Edge-Webview" -Recurse -Force -ErrorAction SilentlyContinue
+    
+    # Remove OneDrive
+    Remove-Item -Path "$scratchDir\Windows\System32\OneDriveSetup.exe" -Force -ErrorAction SilentlyContinue
+
+    Write-Log "Edge and OneDrive removed"
 }
 
 function Remove-WinRE {
     Write-Log "Removing Windows Recovery Environment..."
-
-    $recoveryDir = "$scratchDir\Windows\System32\Recovery"
-    & takeown /f $recoveryDir /r /a | Out-Null
-    & icacls $recoveryDir /grant 'Administrators:F' /T /C | Out-Null
-
-    $winRE = "$recoveryDir\winre.wim"
+    
+    $winRE = "$scratchDir\Windows\System32\Recovery\winre.wim"
     if (Test-Path $winRE) {
-        Remove-Item -Path $winRE -Recurse -Force
+        Remove-Item -Path $winRE -Recurse -Force -ErrorAction SilentlyContinue
         New-Item -Path $winRE -ItemType File -Force | Out-Null
-        Write-Log "WinRE removed and replaced with empty file"
     }
+
+    Write-Log "WinRE removed"
 }
 
 function Optimize-WinSxS {
-    Write-Log "Optimizing WinSxS folder (this is a CORE feature)..."
+    Write-Log "Optimizing WinSxS folder..."
 
     $sourceDirectory = "$scratchDir\Windows\WinSxS"
     $destinationDirectory = "$scratchDir\Windows\WinSxS_edit"
 
-    # Create destination directory
     New-Item -Path $destinationDirectory -ItemType Directory -Force | Out-Null
-
-    # Take ownership
-    Write-Log "Taking ownership of WinSxS..."
-    & takeown /f $sourceDirectory /r /a | Out-Null
-    & icacls $sourceDirectory /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
 
     $dirsToCopy = @()
 
@@ -439,7 +602,6 @@ function Optimize-WinSxS {
             "Manifests",
             "x86_microsoft.vc80.crt_1fc8b3b9a1e18e3b_*",
             "x86_microsoft.vc90.crt_1fc8b3b9a1e18e3b_*",
-            "x86_microsoft.windows.c..-controls.resources_6595b64144ccf1df_*",
             "x86_microsoft.windows.c..-controls.resources_6595b64144ccf1df_*"
         )
     } elseif ($script:architecture -eq "arm64") {
@@ -457,35 +619,17 @@ function Optimize-WinSxS {
             "x86_microsoft.windows.c..-controls.resources_6595b64144ccf1df_*",
             "x86_microsoft.windows.common-controls_6595b64144ccf1df_*",
             "x86_microsoft.windows.gdiplus_6595b64144ccf1df_*",
-            "x86_microsoft.windows.i..utomation.proxystub_6595b64144ccf1df_*",
-            "x86_microsoft.windows.isolationautomation_6595b64144ccf1df_*",
-            "arm_microsoft.windows.c..-controls.resources_6595b64144ccf1df_*",
             "arm_microsoft.windows.common-controls_6595b64144ccf1df_*",
-            "arm_microsoft.windows.gdiplus_6595b64144ccf1df_*",
-            "arm_microsoft.windows.i..utomation.proxystub_6595b64144ccf1df_*",
-            "arm_microsoft.windows.isolationautomation_6595b64144ccf1df_*",
-            "arm64_microsoft.vc80.crt_1fc8b3b9a1e18e3b_*",
-            "arm64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_*",
-            "arm64_microsoft.windows.c..-controls.resources_6595b64144ccf1df_*",
             "arm64_microsoft.windows.common-controls_6595b64144ccf1df_*",
-            "arm64_microsoft.windows.gdiplus_6595b64144ccf1df_*",
-            "arm64_microsoft.windows.i..utomation.proxystub_6595b64144ccf1df_*",
-            "arm64_microsoft.windows.isolationautomation_6595b64144ccf1df_*",
-            "arm64_microsoft-windows-servicing-adm_31bf3856ad364e35_*",
-            "arm64_microsoft-windows-servicingcommon_31bf3856ad364e35_*",
-            "arm64_microsoft-windows-servicing-onecore-uapi_31bf3856ad364e35_*",
-            "arm64_microsoft-windows-servicingstack_31bf3856ad364e35_*",
-            "arm64_microsoft-windows-servicingstack-inetsrv_31bf3856ad364e35_*",
-            "arm64_microsoft-windows-servicingstack-msg_31bf3856ad364e35_*"
+            "arm64_microsoft-windows-servicingstack_31bf3856ad364e35_*"
         )
     }
 
-    # Copy each directory
     foreach ($dir in $dirsToCopy) {
-        $sourceDirs = Get-ChildItem -Path $sourceDirectory -Filter $dir -Directory
+        $sourceDirs = Get-ChildItem -Path $sourceDirectory -Filter $dir -Directory -ErrorAction SilentlyContinue
         foreach ($sourceDir in $sourceDirs) {
             $destDir = Join-Path -Path $destinationDirectory -ChildPath $sourceDir.Name
-            Write-Log "Copying $($sourceDir.FullName) to $destDir"
+            Write-Log "Copying: $($sourceDir.Name)"
             Copy-Item -Path $sourceDir.FullName -Destination $destDir -Recurse -Force
         }
     }
@@ -497,38 +641,37 @@ function Optimize-WinSxS {
     Write-Log "WinSxS optimization complete"
 }
 
+#---------[ Registry Functions ]---------#
 function Load-RegistryHives {
     Write-Log "Loading registry hives..."
 
-    reg load HKLM\zCOMPONENTS "$scratchDir\Windows\System32\config\COMPONENTS" | Out-Null
-    reg load HKLM\zDEFAULT "$scratchDir\Windows\System32\config\default" | Out-Null
-    reg load HKLM\zNTUSER "$scratchDir\Users\Default\ntuser.dat" | Out-Null
-    reg load HKLM\zSOFTWARE "$scratchDir\Windows\System32\config\SOFTWARE" | Out-Null
-    reg load HKLM\zSYSTEM "$scratchDir\Windows\System32\config\SYSTEM" | Out-Null
+    reg load HKLM\zCOMPONENTS "$scratchDir\Windows\System32\config\COMPONENTS" 2>&1 | Out-Null
+    reg load HKLM\zDEFAULT "$scratchDir\Windows\System32\config\default" 2>&1 | Out-Null
+    reg load HKLM\zNTUSER "$scratchDir\Users\Default\ntuser.dat" 2>&1 | Out-Null
+    reg load HKLM\zSOFTWARE "$scratchDir\Windows\System32\config\SOFTWARE" 2>&1 | Out-Null
+    reg load HKLM\zSYSTEM "$scratchDir\Windows\System32\config\SYSTEM" 2>&1 | Out-Null
 
     Write-Log "Registry hives loaded"
 }
 
-function Set-RegistryValue {
-    param (
-        [string]$path,
-        [string]$name,
-        [string]$type,
-        [string]$value
-    )
-    try {
-        & 'reg' 'add' $path '/v' $name '/t' $type '/d' $value '/f' | Out-Null
-        Write-Log "Set registry: $path\$name = $value"
-    } catch {
-        Write-Log "Error setting registry $path\$name : $_" "ERROR"
-        throw
-    }
+function Unload-RegistryHives {
+    Write-Log "Unloading registry hives..."
+
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+    Start-Sleep -Seconds 3
+
+    reg unload HKLM\zCOMPONENTS 2>&1 | Out-Null
+    reg unload HKLM\zDEFAULT 2>&1 | Out-Null
+    reg unload HKLM\zNTUSER 2>&1 | Out-Null
+    reg unload HKLM\zSOFTWARE 2>&1 | Out-Null
+    reg unload HKLM\zSYSTEM 2>&1 | Out-Null
+
+    Write-Log "Registry hives unloaded"
 }
 
 function Apply-RegistryTweaks {
     Write-Log "Applying registry tweaks..."
-
-    # Helper function to ensure key exists is no longer needed with reg add
 
     # Bypass system requirements
     Set-RegistryValue 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' 'SV1' 'REG_DWORD' '0'
@@ -548,27 +691,17 @@ function Apply-RegistryTweaks {
     Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SilentInstalledAppsEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsConsumerFeatures' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'ContentDeliveryAllowed' 'REG_DWORD' '0'
-    
-    $startPins = '{"pinnedList": [{}]}'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\PolicyManager\current\device\Start' 'ConfigureStartPins' 'REG_SZ' $startPins
-    
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\PolicyManager\current\device\Start' 'ConfigureStartPins' 'REG_SZ' '{"pinnedList": [{}]}'
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'FeatureManagementEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'PreInstalledAppsEverEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SoftLandingEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContentEnabled' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-310093Enabled' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-338388Enabled' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-338389Enabled' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-338393Enabled' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-353694Enabled' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-353696Enabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SystemPaneSuggestionsEnabled' 'REG_DWORD' '0'
-
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\PushToInstall' 'DisablePushToInstall' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\MRT' 'DontOfferThroughWUAU' 'REG_DWORD' '1'
-    
-    Remove-Item -Path "HKLM:\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\Subscriptions" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "HKLM:\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\SuggestedApps" -Recurse -Force -ErrorAction SilentlyContinue
+
+    Remove-RegistryKey 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\Subscriptions'
+    Remove-RegistryKey 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\SuggestedApps'
 
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableConsumerAccountStateContent' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableCloudOptimizedContent' 'REG_DWORD' '1'
@@ -576,10 +709,11 @@ function Apply-RegistryTweaks {
     # Enable local accounts on OOBE
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'BypassNRO' 'REG_DWORD' '1'
 
-    # Copy autounattend.xml if exists
-    if (Test-Path "$PSScriptRoot\autounattend.xml") {
-        Copy-Item -Path "$PSScriptRoot\autounattend.xml" -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml" -Force
-        Write-Log "Copied autounattend.xml"
+    # Copy autounattend-nano.xml as autounattend.xml
+    $nanoAutoUnattend = Join-Path (Split-Path $PSScriptRoot -Parent) "autounattend-nano.xml"
+    if (Test-Path $nanoAutoUnattend) {
+        Copy-Item -Path $nanoAutoUnattend -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml" -Force
+        Write-Log "Copied autounattend-nano.xml to Sysprep"
     }
 
     # Disable reserved storage
@@ -593,48 +727,8 @@ function Apply-RegistryTweaks {
     Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'TaskbarMn' 'REG_DWORD' '0'
 
     # Remove Edge registries
-    Remove-Item -Path "HKLM:\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "HKLM:\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge Update" -Recurse -Force -ErrorAction SilentlyContinue
-
-    # Disable OneDrive folder backup
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\OneDrive' 'DisableFileSyncNGSC' 'REG_DWORD' '1'
-
-    # Disable telemetry
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo' 'Enabled' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\Privacy' 'TailoredExperiencesWithDiagnosticDataEnabled' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy' 'HasAccepted' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Input\TIPC' 'Enabled' 'REG_DWORD' '0'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\InputPersonalization' 'RestrictImplicitInkCollection' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\InputPersonalization' 'RestrictImplicitTextCollection' 'REG_DWORD' '1'
-
-    Remove-Item -Path "HKLM:\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\Subscriptions" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "HKLM:\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\SuggestedApps" -Recurse -Force -ErrorAction SilentlyContinue
-
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableConsumerAccountStateContent' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableCloudOptimizedContent' 'REG_DWORD' '1'
-
-    # Enable local accounts on OOBE
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'BypassNRO' 'REG_DWORD' '1'
-
-    # Copy autounattend.xml if exists
-    if (Test-Path "$PSScriptRoot\autounattend.xml") {
-        Copy-Item -Path "$PSScriptRoot\autounattend.xml" -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml" -Force
-        Write-Log "Copied autounattend.xml"
-    }
-
-    # Disable reserved storage
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' 'ShippedWithReserves' 'REG_DWORD' '0'
-
-    # Disable BitLocker
-    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' 'PreventDeviceEncryption' 'REG_DWORD' '1'
-
-    # Disable Chat icon
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' 'ChatIcon' 'REG_DWORD' '3'
-    Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'TaskbarMn' 'REG_DWORD' '0'
-
-    # Remove Edge registries
-    Remove-Item -Path "HKLM:\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "HKLM:\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge Update" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-RegistryKey 'HKLM\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge'
+    Remove-RegistryKey 'HKLM\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge Update'
 
     # Disable OneDrive folder backup
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\OneDrive' 'DisableFileSyncNGSC' 'REG_DWORD' '1'
@@ -654,9 +748,8 @@ function Apply-RegistryTweaks {
     # Prevent DevHome and Outlook installation
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\OutlookUpdate' 'workCompleted' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\DevHomeUpdate' 'workCompleted' 'REG_DWORD' '1'
-
-    Remove-Item -Path "HKLM:\zSOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "HKLM:\zSOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\DevHomeUpdate" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-RegistryKey 'HKLM\zSOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate'
+    Remove-RegistryKey 'HKLM\zSOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\DevHomeUpdate'
 
     # Disable Copilot
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 'REG_DWORD' '1'
@@ -669,29 +762,29 @@ function Apply-RegistryTweaks {
     # Prevent new Outlook installation
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Mail' 'PreventRun' 'REG_DWORD' '1'
 
-    # Disable Windows Update services
+    # Disable Windows Update
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'StopWUPostOOBE1' 'REG_SZ' 'net stop wuauserv'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'StopWUPostOOBE2' 'REG_SZ' 'sc stop wuauserv'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'StopWUPostOOBE3' 'REG_SZ' 'sc config wuauserv start= disabled'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'DisbaleWUPostOOBE1' 'REG_SZ' 'reg add HKLM\SYSTEM\CurrentControlSet\Services\wuauserv /v Start /t REG_DWORD /d 4 /f'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'DisbaleWUPostOOBE2' 'REG_SZ' 'reg add HKLM\SYSTEM\ControlSet001\Services\wuauserv /v Start /t REG_DWORD /d 4 /f'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DoNotConnectToWindowsUpdateInternetLocations' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'WUServer' 'REG_SZ' 'localhost'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'WUStatusServer' 'REG_SZ' 'localhost'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'UpdateServiceUrlAlternate' 'REG_SZ' 'localhost'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'UseWUServer' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoUpdate' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'DisableOnline' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\wuauserv' 'Start' 'REG_DWORD' '4'
+
+    # Delete WaaS services
+    Remove-RegistryKey 'HKLM\zSYSTEM\ControlSet001\Services\WaaSMedicSVC'
+    Remove-RegistryKey 'HKLM\zSYSTEM\ControlSet001\Services\UsoSvc'
 
     # Disable Windows Defender
     Write-Log "Disabling Windows Defender services..."
     $servicePaths = @("WinDefend", "WdNisSvc", "WdNisDrv", "WdFilter", "Sense")
     foreach ($path in $servicePaths) {
-        $servicePath = "HKLM:\zSYSTEM\ControlSet001\Services\$path"
-        if (Test-Path $servicePath) {
-            Set-RegistryValue "HKLM\zSYSTEM\ControlSet001\Services\$path" "Start" "REG_DWORD" "4"
-        }
+        Set-RegistryValue "HKLM\zSYSTEM\ControlSet001\Services\$path" "Start" "REG_DWORD" "4"
     }
 
     # Hide settings pages
@@ -715,44 +808,59 @@ function Remove-ScheduledTasks {
     foreach ($task in $tasksToRemove) {
         if (Test-Path $task) {
             Remove-Item -Path $task -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Log "Removed task: $([System.IO.Path]::GetFileName($task))"
         }
     }
 
     Write-Log "Scheduled tasks removed"
 }
 
-function Unload-RegistryHives {
-    Write-Log "Unloading registry hives..."
+function Remove-Services {
+    Write-Log "Removing non-essential services (nano11-specific)..."
 
-    # Force garbage collection to release any handles
-    [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
-    Start-Sleep -Seconds 3
+    # Load SYSTEM hive separately for service removal
+    reg load HKLM\zSYSTEM "$scratchDir\Windows\System32\config\SYSTEM" 2>&1 | Out-Null
 
-    reg unload HKLM\zCOMPONENTS 2>&1 | Out-Null
-    reg unload HKLM\zDEFAULT 2>&1 | Out-Null
-    reg unload HKLM\zNTUSER 2>&1 | Out-Null
-    reg unload HKLM\zSOFTWARE 2>&1 | Out-Null
+    $servicesToRemove = @(
+        'Spooler',
+        'PrintNotify',
+        'Fax',
+        'RemoteRegistry',
+        'diagsvc',
+        'WerSvc',
+        'PcaSvc',
+        'MapsBroker',
+        'WalletService',
+        'BthAvctpSvc',
+        'BluetoothUserService',
+        'wuauserv',
+        'UsoSvc',
+        'WaaSMedicSvc'
+    )
+
+    foreach ($service in $servicesToRemove) {
+        Write-Log "Removing service: $service"
+        & 'reg' 'delete' "HKLM\zSYSTEM\ControlSet001\Services\$service" /f 2>&1 | Out-Null
+    }
+
     reg unload HKLM\zSYSTEM 2>&1 | Out-Null
 
-    Write-Log "Registry hives unloaded"
+    Write-Log "Services removed"
 }
 
+#---------[ Finalization Functions ]---------#
 function Optimize-WindowsImage {
     Write-Log "Cleaning up Windows image (this may take 10-15 minutes)..."
-    & dism.exe /Image:$scratchDir /Cleanup-Image /StartComponentCleanup /ResetBase | Out-Null
+    & dism.exe /Image:$scratchDir /Cleanup-Image /StartComponentCleanup /ResetBase 2>&1 | Out-Null
     Write-Log "Image cleanup complete"
 }
 
 function Dismount-AndExport {
     Write-Log "Dismounting install.wim..."
-    Dismount-WindowsImage -Path $scratchDir -Save
+    & dism /English /unmount-image "/mountdir:$scratchDir" /commit
 
-    Write-Log "Exporting image with maximum compression (this may take 15-20 minutes)..."
-    $tempWim = "$tiny11Dir\sources\install2.wim"
-    & Dism.exe /Export-Image /SourceImageFile:$wimFilePath /SourceIndex:$INDEX `
-        /DestinationImageFile:$tempWim /Compress:max | Out-Null
+    Write-Log "Exporting image with maximum compression..."
+    $tempWim = "$nano11Dir\sources\install2.wim"
+    & Dism.exe /English /Export-Image /SourceImageFile:$wimFilePath /SourceIndex:$INDEX /DestinationImageFile:$tempWim /Compress:max
 
     Remove-Item -Path $wimFilePath -Force
     Rename-Item -Path $tempWim -NewName "install.wim"
@@ -761,24 +869,29 @@ function Dismount-AndExport {
 }
 
 function Process-BootImage {
-    Write-Log "Processing boot.wim..."
+    Write-Log "Processing boot.wim (nano11 shrinking)..."
 
-    $bootWimPath = "$tiny11Dir\sources\boot.wim"
+    $bootWimPath = "$nano11Dir\sources\boot.wim"
 
     # Take ownership
-    & takeown /F $bootWimPath /A | Out-Null
-    & icacls $bootWimPath /grant "$($adminGroup.Value):(F)" | Out-Null
+    & takeown /F $bootWimPath /A 2>&1 | Out-Null
+    & icacls $bootWimPath /grant "$($adminGroup.Value):(F)" 2>&1 | Out-Null
     Set-ItemProperty -Path $bootWimPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
 
-    Write-Log "Mounting boot.wim (Index 2)..."
-    Mount-WindowsImage -ImagePath $bootWimPath -Index 2 -Path $scratchDir
+    # Export only index 2 (setup image)
+    Write-Log "Exporting boot.wim index 2..."
+    $newBootWimPath = "$nano11Dir\sources\boot_new.wim"
+    & dism /English /Export-Image /SourceImageFile:$bootWimPath /SourceIndex:2 /DestinationImageFile:$newBootWimPath
 
-    # Load registry and apply tweaks
-    reg load HKLM\zCOMPONENTS "$scratchDir\Windows\System32\config\COMPONENTS" | Out-Null
-    reg load HKLM\zDEFAULT "$scratchDir\Windows\System32\config\default" | Out-Null
-    reg load HKLM\zNTUSER "$scratchDir\Users\Default\ntuser.dat" | Out-Null
-    reg load HKLM\zSOFTWARE "$scratchDir\Windows\System32\config\SOFTWARE" | Out-Null
-    reg load HKLM\zSYSTEM "$scratchDir\Windows\System32\config\SYSTEM" | Out-Null
+    # Mount the new boot image
+    Write-Log "Mounting boot image for modifications..."
+    & dism /English /mount-image "/imagefile:$newBootWimPath" /index:1 "/mountdir:$scratchDir"
+
+    # Load registry and apply bypasses
+    reg load HKLM\zDEFAULT "$scratchDir\Windows\System32\config\default" 2>&1 | Out-Null
+    reg load HKLM\zNTUSER "$scratchDir\Users\Default\ntuser.dat" 2>&1 | Out-Null
+    reg load HKLM\zSOFTWARE "$scratchDir\Windows\System32\config\SOFTWARE" 2>&1 | Out-Null
+    reg load HKLM\zSYSTEM "$scratchDir\Windows\System32\config\SYSTEM" 2>&1 | Out-Null
 
     Write-Log "Applying system requirement bypasses to boot image..."
     Set-RegistryValue 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' 'SV1' 'REG_DWORD' '0'
@@ -791,53 +904,69 @@ function Process-BootImage {
     Set-RegistryValue 'HKLM\zSYSTEM\Setup\LabConfig' 'BypassStorageCheck' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSYSTEM\Setup\LabConfig' 'BypassTPMCheck' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSYSTEM\Setup\MoSetup' 'AllowUpgradesWithUnsupportedTPMOrCPU' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSYSTEM\Setup' 'CmdLine' 'REG_SZ' 'X:\sources\setup.exe'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' 'PreventDeviceEncryption' 'REG_DWORD' '1'
 
     # Unload registry
-    reg unload HKLM\zCOMPONENTS | Out-Null
-    reg unload HKLM\zDEFAULT | Out-Null
-    reg unload HKLM\zNTUSER | Out-Null
-    reg unload HKLM\zSOFTWARE | Out-Null
-    reg unload HKLM\zSYSTEM | Out-Null
+    reg unload HKLM\zNTUSER 2>&1 | Out-Null
+    reg unload HKLM\zDEFAULT 2>&1 | Out-Null
+    reg unload HKLM\zSOFTWARE 2>&1 | Out-Null
+    reg unload HKLM\zSYSTEM 2>&1 | Out-Null
 
-    Write-Log "Dismounting boot.wim..."
-    Dismount-WindowsImage -Path $scratchDir -Save
+    Start-Sleep -Seconds 5
+
+    # Dismount boot image
+    Write-Log "Dismounting boot image..."
+    & dism /English /unmount-image "/mountdir:$scratchDir" /commit
+
+    # Replace original boot.wim with shrunk version
+    Remove-Item -Path $bootWimPath -Force
+    $finalBootWimPath = "$nano11Dir\sources\boot_final.wim"
+    & dism /English /Export-Image /SourceImageFile:$newBootWimPath /SourceIndex:1 /DestinationImageFile:$finalBootWimPath /Compress:max
+    Remove-Item -Path $newBootWimPath -Force
+    Rename-Item -Path $finalBootWimPath -NewName "boot.wim"
 
     Write-Log "Boot image processing complete"
 }
 
 function Convert-ToESD {
-    Write-Log "Converting to ESD format for maximum compression (this may take 20-30 minutes)..."
-
-    $esdPath = "$tiny11Dir\sources\install.esd"
+    Write-Log "Converting to ESD format for maximum compression..."
+    $esdPath = "$nano11Dir\sources\install.esd"
     & dism /Export-Image /SourceImageFile:$wimFilePath /SourceIndex:1 /DestinationImageFile:$esdPath /Compress:recovery
-
-    # Remove the WIM file
-    Remove-Item $wimFilePath -Force
-
+    Remove-Item $wimFilePath -Force -ErrorAction SilentlyContinue
     Write-Log "ESD conversion complete"
 }
 
-function Create-TinyISO {
-    Write-Log "Creating ISO image..."
-
-    # Copy autounattend.xml to ISO root for OOBE bypass
-    if (Test-Path "$PSScriptRoot\autounattend.xml") {
-        Copy-Item -Path "$PSScriptRoot\autounattend.xml" -Destination "$tiny11Dir\autounattend.xml" -Force
-        Write-Log "Copied autounattend.xml to ISO root"
+function Clean-IsoRoot {
+    Write-Log "Cleaning ISO root (keeping only essentials)..."
+    
+    $keepList = @("boot", "efi", "sources", "bootmgr", "bootmgr.efi", "setup.exe", "autounattend.xml")
+    Get-ChildItem -Path $nano11Dir | Where-Object { $_.Name -notin $keepList } | ForEach-Object {
+        Write-Log "Removing from ISO root: $($_.Name)"
+        Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    # Verify boot files exist before creating ISO
-    $bootFiles = @(
-        "$tiny11Dir\boot\etfsboot.com",
-        "$tiny11Dir\efi\microsoft\boot\efisys.bin"
-    )
+    Write-Log "ISO root cleaned"
+}
 
+function Create-NanoISO {
+    Write-Log "Creating ISO image..."
+
+    # Copy autounattend-nano.xml as autounattend.xml to ISO root
+    $nanoAutoUnattend = Join-Path (Split-Path $PSScriptRoot -Parent) "autounattend-nano.xml"
+    if (Test-Path $nanoAutoUnattend) {
+        Copy-Item -Path $nanoAutoUnattend -Destination "$nano11Dir\autounattend.xml" -Force
+        Write-Log "Copied autounattend-nano.xml to ISO root as autounattend.xml"
+    }
+
+    # Verify boot files
+    $bootFiles = @(
+        "$nano11Dir\boot\etfsboot.com",
+        "$nano11Dir\efi\microsoft\boot\efisys.bin"
+    )
     foreach ($bootFile in $bootFiles) {
         if (-not (Test-Path $bootFile)) {
             throw "Required boot file not found: $bootFile"
         }
-        Write-Log "Boot file verified: $bootFile"
     }
 
     # Determine oscdimg.exe location
@@ -851,20 +980,16 @@ function Create-TinyISO {
     } else {
         Write-Log "ADK not found, downloading oscdimg.exe..."
         $url = "https://msdl.microsoft.com/download/symbols/oscdimg.exe/3D44737265000/oscdimg.exe"
-
         if (-not (Test-Path $localOSCDIMGPath)) {
             Invoke-WebRequest -Uri $url -OutFile $localOSCDIMGPath -UseBasicParsing
-            Write-Log "Downloaded oscdimg.exe"
         }
-
         $OSCDIMG = $localOSCDIMGPath
     }
 
-    # Build the ISO
-    Write-Log "Building bootable ISO (this may take 5-10 minutes)..."
+    Write-Log "Building bootable ISO..."
     & $OSCDIMG '-m' '-o' '-u2' '-udfver102' `
-        "-bootdata:2#p0,e,b$tiny11Dir\boot\etfsboot.com#pEF,e,b$tiny11Dir\efi\microsoft\boot\efisys.bin" `
-        $tiny11Dir $outputISO | Out-Null
+        "-bootdata:2#p0,e,b$nano11Dir\boot\etfsboot.com#pEF,e,b$nano11Dir\efi\microsoft\boot\efisys.bin" `
+        $nano11Dir $outputISO
 
     if (Test-Path $outputISO) {
         $isoSize = [math]::Round((Get-Item $outputISO).Length / 1GB, 2)
@@ -882,32 +1007,22 @@ function Invoke-Cleanup {
 
     Write-Log "Performing cleanup..."
 
-    # Remove temporary directories
-    Remove-Item -Path $tiny11Dir -Recurse -Force -ErrorAction SilentlyContinue
+    # Ensure image is unmounted
+    & dism /English /unmount-image "/mountdir:$scratchDir" /discard 2>&1 | Out-Null
+
+    Remove-Item -Path $nano11Dir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -Path $scratchDir -Recurse -Force -ErrorAction SilentlyContinue
-
-    # Remove downloaded files
     Remove-Item -Path "$PSScriptRoot\oscdimg.exe" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$PSScriptRoot\autounattend.xml" -Force -ErrorAction SilentlyContinue
 
-    # Verify cleanup
-    $remainingItems = @()
-    if (Test-Path $tiny11Dir) { $remainingItems += "tiny11 folder" }
-    if (Test-Path $scratchDir) { $remainingItems += "scratchdir folder" }
-
-    if ($remainingItems.Count -gt 0) {
-        Write-Log "Cleanup incomplete: $($remainingItems -join ', ') still exist" "WARN"
-    } else {
-        Write-Log "Cleanup complete"
-    }
+    Write-Log "Cleanup complete"
 }
 
-#---------[ Main Execution ]---------
+#---------[ Main Execution ]---------#
 try {
-    Write-Log "=== Tiny11 Core Headless Builder Started ===" "INFO"
+    Write-Log "=== Nano11 Headless Builder Started ===" "INFO"
     Write-Log "Author: kelexine (https://github.com/kelexine)"
     Write-Log "Parameters: ISO=$ISO, INDEX=$INDEX, SCRATCH=$ScratchDisk"
-    Write-Log "WARNING: This creates a minimal Windows 11 Core image - NOT for daily use!"
+    Write-Log "WARNING: This creates the most minimal Windows 11 image - FOR TESTING ONLY!"
 
     Test-Prerequisites
     Initialize-Directories
@@ -924,52 +1039,45 @@ try {
 
     Validate-ImageIndex
     Mount-WindowsImageFile
+    Take-OwnershipOfFolders
     Get-ImageMetadata
 
     # Customization phase
     Remove-BloatwareApps
     Remove-SystemPackages
-
-    # .NET 3.5 installation (optional, Core-only)
-    if ($ENABLE_DOTNET35) {
-        Write-Log "Enabling .NET 3.5..." "INFO"
-        & dism /English /image:$scratchDir /enable-feature /featurename:NetFX3 /All /source:$tiny11Dir\sources\sxs 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Log ".NET 3.5 has been enabled" "SUCCESS"
-        } else {
-            Write-Log ".NET 3.5 installation failed (exit code: $LASTEXITCODE)" "WARN"
-        }
-    } else {
-        Write-Log ".NET 3.5 will not be enabled (ENABLE_DOTNET35: $ENABLE_DOTNET35)" "INFO"
-    }
-
+    Remove-NativeImages
+    Slim-DriverStore
+    Reduce-Fonts
+    Clean-InputMethods
+    Remove-MiscellaneousFiles
     Remove-EdgeAndOneDrive
     Remove-WinRE
 
+    # Registry phase
     Load-RegistryHives
     Apply-RegistryTweaks
     Remove-ScheduledTasks
     Unload-RegistryHives
 
-    # WinSxS optimization (CORE-specific)
+    # Service removal (separate registry operation)
+    Remove-Services
+
+    # WinSxS optimization
     Optimize-WinSxS
 
     # Finalization phase
-    Optimize-WindowsImage
     Dismount-AndExport
     Process-BootImage
-
-    # Convert to ESD (CORE-specific: maximum compression)
     Convert-ToESD
-
-    Create-TinyISO
+    Clean-IsoRoot
+    Create-NanoISO
 
     # Cleanup
     Invoke-Cleanup
 
-    Write-Log "=== Tiny11 Core Build Completed Successfully ===" "INFO"
+    Write-Log "=== Nano11 Build Completed Successfully ===" "INFO"
     Write-Log "Output: $outputISO"
-    Write-Log "WARNING: This is a minimal Core build with reduced serviceability!"
+    Write-Log "WARNING: This is AN EXTREMELY MINIMAL build - NOT for daily use!"
 
     exit 0
 
@@ -984,7 +1092,6 @@ try {
             Dismount-WindowsImage -Path $_.Path -Discard -ErrorAction SilentlyContinue
         }
 
-        # Unload any remaining registry hives
         @("zCOMPONENTS", "zDEFAULT", "zNTUSER", "zSOFTWARE", "zSYSTEM") | ForEach-Object {
             reg unload "HKLM\$_" 2>$null
         }
