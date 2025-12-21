@@ -40,6 +40,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Scripts Directory
+        run: |
+          # Ensure scripts directory exists
+          mkdir -p scripts
+          
+          # If release_detector.py doesn't exist in scripts, check root
+          if [ ! -f "scripts/release_detector.py" ] && [ -f "release_detector.py" ]; then
+            echo "📦 Moving release_detector.py to scripts/"
+            mv release_detector.py scripts/
+          fi
       
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -75,22 +87,62 @@ jobs:
         env:
           FORCE_CHECK: ${{ github.event.inputs.force_check || 'false' }}
         run: |
-          # Run the Python detector script
-          python3 scripts/release_detector.py \
-            --force=${{ env.FORCE_CHECK }} \
-            --output=detector_output.txt \
-            --tracking-file=${{ env.RELEASE_TRACKING_FILE }}
+          echo "=================================="
+          echo "🔍 Windows Release Detection"
+          echo "=================================="
+          echo "Force check: $FORCE_CHECK"
+          echo "Tracking file: ${{ env.RELEASE_TRACKING_FILE }}"
+          echo ""
+          
+          # Build command with conditional --force flag
+          if [ "$FORCE_CHECK" = "true" ]; then
+            echo "🔄 Running with --force flag (will re-check recently detected builds)"
+            python3 scripts/release_detector.py \
+              --force \
+              --output=detector_output.txt \
+              --tracking-file=${{ env.RELEASE_TRACKING_FILE }}
+          else
+            echo "📅 Running normal check (skips if checked within last hour)"
+            python3 scripts/release_detector.py \
+              --output=detector_output.txt \
+              --tracking-file=${{ env.RELEASE_TRACKING_FILE }}
+          fi
+          
+          DETECTOR_EXIT=$?
+          echo ""
+          echo "Detector exit code: $DETECTOR_EXIT"
+          
+          if [ $DETECTOR_EXIT -ne 0 ]; then
+            echo "❌ Detector script failed!"
+            echo "has_new=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
           
           # Read outputs from file and set GitHub Actions outputs
           if [ -f "detector_output.txt" ]; then
+            echo ""
+            echo "📄 Reading detector outputs..."
+            echo "=================================="
+            
             # Read each line and set as output
             while IFS='=' read -r key value; do
-              # Skip empty lines
-              if [ -n "$key" ]; then
+              # Skip empty lines and comments
+              if [ -n "$key" ] && [[ ! "$key" =~ ^# ]]; then
                 echo "$key=$value" >> $GITHUB_OUTPUT
-                echo "Set output: $key (length: ${#value})"
+                
+                # Show appropriate output based on size
+                if [ ${#value} -gt 200 ]; then
+                  echo "✓ Set output: $key (${#value} chars - JSON data)"
+                elif [ ${#value} -gt 50 ]; then
+                  echo "✓ Set output: $key=${value:0:50}... (${#value} chars)"
+                else
+                  echo "✓ Set output: $key=$value"
+                fi
               fi
             done < detector_output.txt
+            
+            echo "=================================="
+            echo "✅ Outputs set successfully"
           else
             echo "❌ Detector output file not found!"
             echo "has_new=false" >> $GITHUB_OUTPUT
