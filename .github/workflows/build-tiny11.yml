@@ -55,6 +55,21 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Discord - Build Started
+        continue-on-error: true
+        run: |
+          python scripts/discord_notify.py `
+            --webhook "$env:DISCORD_WEBHOOK" `
+            --type build-started `
+            --data (ConvertTo-Json @{
+              version = "${{ inputs.windows_version }}"
+              build_type = "${{ matrix.build_type }}"
+              edition = "${{ matrix.edition_name }}"
+            } -Compress)
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_BUILDS }}
+        shell: pwsh
+
       - name: Generate release tag and ISO name
         shell: powershell
         run: |
@@ -304,6 +319,36 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "ISO_SHA256=$sha256"
           Add-Content -Path $env:GITHUB_ENV -Value "ISO_MD5=$md5"
           
+      - name: Discord - Build Completed
+        if: success()
+        continue-on-error: true
+        run: |
+          # Get ISO size
+          $isoPath = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
+          $isoSize = if ($isoPath) { 
+            "{0:N2} GB" -f ($isoPath.Length / 1GB)
+          } else { 
+            "Unknown" 
+          }
+          
+          # Calculate duration (rough estimate)
+          $duration = "${{ job.duration }}"
+          
+          python scripts/discord_notify.py `
+            --webhook "$env:DISCORD_WEBHOOK" `
+            --type build-completed `
+            --data (ConvertTo-Json @{
+              version = "${{ inputs.windows_version }}"
+              build_type = "${{ matrix.build_type }}"
+              edition = "${{ matrix.edition_name }}"
+              duration = "Completed"
+              iso_size = $isoSize
+              download_url = "https://sourceforge.net/projects/tiny-11-releases/"
+            } -Compress)
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_BUILDS }}
+        shell: pwsh
+
       - name: Cleanup before upload
         shell: powershell
         run: |
@@ -587,3 +632,21 @@ jobs:
           "@
 
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
+
+      - name: Discord - Build Failed
+        if: failure()
+        continue-on-error: true
+        run: |
+          python scripts/discord_notify.py `
+            --webhook "$env:DISCORD_WEBHOOK" `
+            --type build-failed `
+            --data (ConvertTo-Json @{
+              version = "${{ inputs.windows_version }}"
+              build_type = "${{ matrix.build_type }}"
+              edition = "${{ matrix.edition_name }}"
+              error = "Build failed - check logs for details"
+              logs_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } -Compress)
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_ERRORS }}
+        shell: pwsh
