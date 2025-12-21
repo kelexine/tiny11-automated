@@ -253,7 +253,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        release: ${{ fromJson(needs.detect-releases.outputs.releases_matrix) }}
+        release: "${{ fromJson(needs.detect-releases.outputs.releases_matrix) }}"
         build_type: ['standard', 'core', 'nano']
         edition: [1, 6]  # Home and Pro
     
