@@ -1,0 +1,26 @@
+# Python Dependencies for Tiny11 Version Matrix Builder
+# Author: kelexine (https://github.com/kelexine)
+
+# Core dependencies
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+
+# Optional: Enhanced functionality
+python-dateutil>=2.8.2
+
+# Optional: Better JSON handling
+ujson>=5.9.0
+
+# Optional: Progress indicators
+tqdm>=4.66.0
+
+# Optional: Async support (for future enhancements)
+aiohttp>=3.9.0
+
+# Development dependencies (commented out for production)
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+black>=24.0.0
+flake8>=7.0.0
+mypy>=1.8.0

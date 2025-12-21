@@ -46,10 +46,16 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: '**/requirements.txt'
       
       - name: Install Dependencies
         run: |
-          pip install requests beautifulsoup4 lxml
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            # Fallback to direct install if no requirements file
+            pip install requests beautifulsoup4 lxml
+          fi
       
       - name: Fetch Current Tracked Releases
         id: fetch_tracked
