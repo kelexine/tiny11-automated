@@ -127,9 +127,9 @@ Set-ExecutionPolicy Bypass -Scope Process
   </tr>
   <tr>
     <td><strong>ISO Size</strong></td>
-    <td>~2.5-3GB</td>
-    <td>~2GB</td>
-    <td>~1.5GB</td>
+    <td>~3.5-5.5GB</td>
+    <td>~3-3.5GB</td>
+    <td>~2.5GB</td>
   </tr>
   <tr>
     <td><strong>Bloatware Removal</strong></td>
