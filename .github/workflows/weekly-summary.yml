@@ -1,8 +1,8 @@
-name: Daily Summary
+name: Weekly Summary
 
 on:
   schedule:
-    - cron: '0 23 * * *'  # 11 PM UTC daily
+    - cron: '0 2 * * 0'  # 2 AM UTC weekly on Sundays
   workflow_dispatch:
 
 jobs:
