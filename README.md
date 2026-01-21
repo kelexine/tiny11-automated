@@ -3,8 +3,9 @@
 [![Build Tiny11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml)
 [![Build Tiny11 Core](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml)
 [![Build Nano11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml)
-[![Downloads](https://img.shields.io/badge/downloads-2.1k-brightgreen)](https://sourceforge.net/projects/tiny-11-releases/files/)
+[![Download Tiny 11](https://img.shields.io/sourceforge/dm/tiny-11-releases.svg)](https://sourceforge.net/projects/tiny-11-releases/files/latest/download)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 [![Code of Conduct](https://img.shields.io/badge/code%20of%20conduct-contributor%20covenant-purple.svg)](CODE_OF_CONDUCT.md)
 
 **Automated tools for creating streamlined Windows 11 images with CI/CD support.**
@@ -45,6 +46,7 @@ This project is based on the original [tiny11 builder by ntdevlabs](https://gith
 
 ### 📥 Downloads
 
+<a href="https://sourceforge.net/p/tiny-11-releases/"><img alt="Download Tiny 11 Releases" src="https://sourceforge.net/sflogo.php?type=18&amp;group_id=3937094" width=200></a>
 - **Pre-built ISOs**: [SourceForge](https://sourceforge.net/projects/tiny-11-releases/files/) (Primary source)
 - **Release Notes**: [GitHub Releases](https://github.com/kelexine/tiny11-automated/releases)
 - **Source Code**: [GitHub Repository](https://github.com/kelexine/tiny11-automated)
