@@ -798,11 +798,11 @@ All contributors are recognized in:
 
 ### Community Stats
 
-- 👥 **Active Users**: 2,000+
-- 📥 **Total Downloads**: 2,100+
-- 📈 **Weekly Downloads**: 1,189 (growing!)
-- ⭐ **GitHub Stars**: 3
-- 🍴 **Forks**: 1
+- 👥 **Active Users**: 3,000+
+- 📥 **Total Downloads**: 19,000+
+- 📈 **Weekly Downloads**: 3,000 (growing!)
+- ⭐ **GitHub Stars**: 11
+- 🍴 **Forks**: 8
 
 ### Get Help
 
