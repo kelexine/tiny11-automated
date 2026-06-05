@@ -65,7 +65,7 @@ if (-not $SCRATCH) {
 
 $DriveLetter = $ISO + ":"
 $wimFilePath = "$ScratchDisk\nano11\sources\install.wim"
-$scratchDir = "$ScratchDisk\scratchdir"
+$scratchDir = "$ScratchDisk\s2"
 $nano11Dir = "$ScratchDisk\nano11"
 $outputISO = "$PSScriptRoot\nano11.iso"
 $logFile = "$PSScriptRoot\nano11_$(Get-Date -Format yyyyMMdd_HHmmss).log"
@@ -115,6 +115,24 @@ function Remove-RegistryKey {
         Write-Log "Removed registry key: $path"
     } catch {
         Write-Log "Registry key not found or error: $path" "WARN"
+    }
+}
+
+function Remove-RegistryValue {
+    param(
+        [string]$fullPath
+    )
+    try {
+        if ($fullPath -match '^(.*)\\(.*)$') {
+            $keyPath = $Matches[1]
+            $valueName = $Matches[2]
+            & 'reg' 'delete' $keyPath '/v' $valueName '/f' 2>&1 | Out-Null
+            Write-Log "Removed registry value: $keyPath\$valueName"
+        } else {
+            Write-Log "Invalid registry value path format: $fullPath" "WARN"
+        }
+    } catch {
+        Write-Log "Error removing registry value $fullPath : $_" "WARN"
     }
 }
 
@@ -647,15 +665,15 @@ function Remove-EdgeAndOneDrive {
 }
 
 function Remove-WinRE {
-    Write-Log "Removing Windows Recovery Environment..."
+    Write-Log "Preserving Windows Recovery Environment (Option A)..."
     
-    $winRE = "$scratchDir\Windows\System32\Recovery\winre.wim"
-    if (Test-Path $winRE) {
-        Remove-Item -Path $winRE -Recurse -Force -ErrorAction SilentlyContinue
-        New-Item -Path $winRE -ItemType File -Force | Out-Null
-    }
+    # $winRE = "$scratchDir\Windows\System32\Recovery\winre.wim"
+    # if (Test-Path $winRE) {
+    #     Remove-Item -Path $winRE -Recurse -Force -ErrorAction SilentlyContinue
+    #     New-Item -Path $winRE -ItemType File -Force | Out-Null
+    # }
 
-    Write-Log "WinRE removed"
+    # Write-Log "WinRE removed"
 }
 
 function Optimize-WinSxS {
@@ -1169,7 +1187,7 @@ function Invoke-Cleanup {
 
     Remove-Item -Path $nano11Dir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -Path $scratchDir -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$PSScriptRoot\oscdimg.exe" -Force -ErrorAction SilentlyContinue
+    # Remove-Item -Path "$PSScriptRoot\oscdimg.exe" -Force -ErrorAction SilentlyContinue
 
     Write-Log "Cleanup complete"
 }
@@ -1261,3 +1279,4 @@ try {
 
     exit 1
 }
+

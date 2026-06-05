@@ -201,8 +201,8 @@ Remove-Item -Path "$scratchDir\Program Files (x86)\Microsoft\Edge*" -Recurse -Fo
 if ($architecture -eq 'amd64') { $folderPath = Get-ChildItem -Path "$scratchDir\Windows\WinSxS" -Filter "amd64_microsoft-edge-webview_31bf3856ad364e35*" -Directory | Select-Object -ExpandProperty FullName } 
 if ($folderPath) { Remove-Item -Path $folderPath -Recurse -Force  }
 Remove-Item -Path "$scratchDir\Windows\System32\Microsoft-Edge-Webview" -Recurse -Force
-Remove-Item -Path "$scratchDir\Windows\System32\Recovery\winre.wim" -Recurse -Force
-New-Item -Path "$scratchDir\Windows\System32\Recovery\winre.wim" -ItemType File -Force
+# Remove-Item -Path "$scratchDir\Windows\System32\Recovery\winre.wim" -Recurse -Force
+# New-Item -Path "$scratchDir\Windows\System32\Recovery\winre.wim" -ItemType File -Force
 Remove-Item -Path "$scratchDir\Windows\System32\OneDriveSetup.exe" -Force 
 & 'dism' '/English' "/image:$scratchDir" '/Cleanup-Image' '/StartComponentCleanup' '/ResetBase' 
 

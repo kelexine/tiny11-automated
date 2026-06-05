@@ -477,8 +477,7 @@ Remove-Item -Path "$ScratchDisk\scratchdir" -Recurse -Force | Out-Null
 Write-Output "Ejecting Iso drive"
 Get-Volume -DriveLetter $DriveLetter[0] | Get-DiskImage | Dismount-DiskImage
 Write-Output "Iso drive ejected"
-Write-Output "Removing oscdimg.exe..."
-Remove-Item -Path "$PSScriptRoot\oscdimg.exe" -Force -ErrorAction SilentlyContinue
+# Remove-Item -Path "$PSScriptRoot\oscdimg.exe" -Force -ErrorAction SilentlyContinue
 Write-Output "Removing autounattend.xml..."
 Remove-Item -Path "$PSScriptRoot\autounattend.xml" -Force -ErrorAction SilentlyContinue
 

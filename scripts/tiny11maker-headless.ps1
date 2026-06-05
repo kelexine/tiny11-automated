@@ -761,7 +761,7 @@ function Invoke-Cleanup {
     Remove-Item -Path $scratchDir -Recurse -Force -ErrorAction SilentlyContinue
     
     # Remove downloaded files
-    Remove-Item -Path "$PSScriptRoot\oscdimg.exe" -Force -ErrorAction SilentlyContinue
+    # Remove-Item -Path "$PSScriptRoot\oscdimg.exe" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "$PSScriptRoot\autounattend.xml" -Force -ErrorAction SilentlyContinue
     
     # Verify cleanup

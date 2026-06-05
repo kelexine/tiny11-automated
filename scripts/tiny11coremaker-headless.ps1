@@ -473,18 +473,18 @@ function Remove-EdgeAndOneDrive {
 }
 
 function Remove-WinRE {
-    Write-Log "Removing Windows Recovery Environment..."
+    Write-Log "Preserving Windows Recovery Environment (Option A)..."
 
-    $recoveryDir = "$scratchDir\Windows\System32\Recovery"
-    & takeown /f $recoveryDir /r /a | Out-Null
-    & icacls $recoveryDir /grant 'Administrators:F' /T /C | Out-Null
+    # $recoveryDir = "$scratchDir\Windows\System32\Recovery"
+    # & takeown /f $recoveryDir /r /a | Out-Null
+    # & icacls $recoveryDir /grant 'Administrators:F' /T /C | Out-Null
 
-    $winRE = "$recoveryDir\winre.wim"
-    if (Test-Path $winRE) {
-        Remove-Item -Path $winRE -Recurse -Force
-        New-Item -Path $winRE -ItemType File -Force | Out-Null
-        Write-Log "WinRE removed and replaced with empty file"
-    }
+    # $winRE = "$recoveryDir\winre.wim"
+    # if (Test-Path $winRE) {
+    #     Remove-Item -Path $winRE -Recurse -Force
+    #     New-Item -Path $winRE -ItemType File -Force | Out-Null
+    #     Write-Log "WinRE removed and replaced with empty file"
+    # }
 }
 
 function Optimize-WinSxS {
@@ -1053,7 +1053,7 @@ function Invoke-Cleanup {
     Remove-Item -Path $scratchDir -Recurse -Force -ErrorAction SilentlyContinue
 
     # Remove downloaded files
-    Remove-Item -Path "$PSScriptRoot\oscdimg.exe" -Force -ErrorAction SilentlyContinue
+    # Remove-Item -Path "$PSScriptRoot\oscdimg.exe" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "$PSScriptRoot\autounattend.xml" -Force -ErrorAction SilentlyContinue
 
     # Verify cleanup
@@ -1164,3 +1164,4 @@ try {
 
     exit 1
 }
+
