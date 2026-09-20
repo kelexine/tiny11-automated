@@ -436,6 +436,10 @@ function Remove-EdgeAndOneDrive {
         "$scratchDir\Program Files (x86)\Microsoft\EdgeUpdate",
         "$scratchDir\Program Files (x86)\Microsoft\EdgeCore",
         "$scratchDir\Program Files (x86)\Microsoft\EdgeWebView",
+        "$scratchDir\Program Files\Microsoft\Edge",
+        "$scratchDir\Program Files\Microsoft\EdgeUpdate",
+        "$scratchDir\Program Files\Microsoft\EdgeCore",
+        "$scratchDir\Program Files\Microsoft\EdgeWebView",
         "$scratchDir\Windows\System32\Microsoft-Edge-Webview"
     )
 
@@ -1170,17 +1174,14 @@ function Create-TinyISO {
     }
 
     # Verify boot files exist before creating ISO
-    $bootFiles = @(
-        "$tiny11Dir\boot\etfsboot.com",
-        "$tiny11Dir\efi\microsoft\boot\efisys.bin"
-    )
+    $hasBiosBoot = Test-Path "$tiny11Dir\boot\etfsboot.com"
+    $hasUefiBoot = Test-Path "$tiny11Dir\efi\microsoft\boot\efisys.bin"
 
-    foreach ($bootFile in $bootFiles) {
-        if (-not (Test-Path $bootFile)) {
-            throw "Required boot file not found: $bootFile"
-        }
-        Write-Log "Boot file verified: $bootFile"
+    if (-not $hasUefiBoot -and -not $hasBiosBoot) {
+        throw "Required boot files not found (neither UEFI efisys.bin nor BIOS etfsboot.com exists)"
     }
+    if ($hasBiosBoot) { Write-Log "Boot file verified: $tiny11Dir\boot\etfsboot.com" }
+    if ($hasUefiBoot) { Write-Log "Boot file verified: $tiny11Dir\efi\microsoft\boot\efisys.bin" }
 
     # Determine oscdimg.exe location
     $hostArchitecture = $Env:PROCESSOR_ARCHITECTURE
@@ -1204,9 +1205,18 @@ function Create-TinyISO {
 
     # Build the ISO
     Write-Log "Building bootable ISO (this may take 5-10 minutes)..."
-    & $OSCDIMG '-m' '-o' '-u2' '-udfver102' `
-        "-bootdata:2#p0,e,b$tiny11Dir\boot\etfsboot.com#pEF,e,b$tiny11Dir\efi\microsoft\boot\efisys.bin" `
-        $tiny11Dir $outputISO | Out-Null
+    if ($hasBiosBoot -and $hasUefiBoot) {
+        Write-Log "Detected BIOS and UEFI boot files. Using dual boot configuration..."
+        $bootData = "-bootdata:2#p0,e,b$tiny11Dir\boot\etfsboot.com#pEF,e,b$tiny11Dir\efi\microsoft\boot\efisys.bin"
+    } elseif ($hasUefiBoot) {
+        Write-Log "Detected UEFI boot file only (ARM64 or pure UEFI). Using UEFI boot configuration..."
+        $bootData = "-bootdata:1#pEF,e,b$tiny11Dir\efi\microsoft\boot\efisys.bin"
+    } elseif ($hasBiosBoot) {
+        Write-Log "Detected BIOS boot file only. Using BIOS boot configuration..."
+        $bootData = "-b$tiny11Dir\boot\etfsboot.com"
+    }
+
+    & $OSCDIMG '-m' '-o' '-u2' '-udfver102' $bootData $tiny11Dir $outputISO | Out-Null
 
     if (Test-Path $outputISO) {
         $isoSize = [math]::Round((Get-Item $outputISO).Length / 1GB, 2)
@@ -1227,6 +1237,7 @@ function Write-BuildInfo {
             windows_build = $script:DetectedBuildNumber
             full_version  = $script:DetectedFullVersion
             image_name    = $script:DetectedImageName
+            architecture  = $script:architecture
             image_index   = $INDEX
             generated_at  = (Get-Date -Format 'o')
         }

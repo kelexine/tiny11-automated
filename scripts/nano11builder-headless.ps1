@@ -1335,18 +1335,21 @@ function Create-NanoISO {
     if (Test-Path $nanoAutoUnattend) {
         Copy-Item -Path $nanoAutoUnattend -Destination "$nano11Dir\autounattend.xml" -Force
         Write-Log "Copied autounattend-nano.xml to ISO root as autounattend.xml"
+        if ($script:architecture -eq "arm64") {
+            (Get-Content -Path "$nano11Dir\autounattend.xml" -Raw) -replace 'processorArchitecture="amd64"', 'processorArchitecture="arm64"' | Set-Content -Path "$nano11Dir\autounattend.xml" -Encoding UTF8
+            Write-Log "Updated autounattend.xml processorArchitecture to arm64"
+        }
     }
 
     # Verify boot files
-    $bootFiles = @(
-        "$nano11Dir\boot\etfsboot.com",
-        "$nano11Dir\efi\microsoft\boot\efisys.bin"
-    )
-    foreach ($bootFile in $bootFiles) {
-        if (-not (Test-Path $bootFile)) {
-            throw "Required boot file not found: $bootFile"
-        }
+    $hasBiosBoot = Test-Path "$nano11Dir\boot\etfsboot.com"
+    $hasUefiBoot = Test-Path "$nano11Dir\efi\microsoft\boot\efisys.bin"
+
+    if (-not $hasUefiBoot -and -not $hasBiosBoot) {
+        throw "Required boot files not found (neither UEFI efisys.bin nor BIOS etfsboot.com exists)"
     }
+    if ($hasBiosBoot) { Write-Log "Boot file verified: $nano11Dir\boot\etfsboot.com" }
+    if ($hasUefiBoot) { Write-Log "Boot file verified: $nano11Dir\efi\microsoft\boot\efisys.bin" }
 
     # Determine oscdimg.exe location
     $hostArchitecture = $Env:PROCESSOR_ARCHITECTURE
@@ -1366,9 +1369,18 @@ function Create-NanoISO {
     }
 
     Write-Log "Building bootable ISO..."
-    & $OSCDIMG '-m' '-o' '-u2' '-udfver102' `
-        "-bootdata:2#p0,e,b$nano11Dir\boot\etfsboot.com#pEF,e,b$nano11Dir\efi\microsoft\boot\efisys.bin" `
-        $nano11Dir $outputISO
+    if ($hasBiosBoot -and $hasUefiBoot) {
+        Write-Log "Detected BIOS and UEFI boot files. Using dual boot configuration..."
+        $bootData = "-bootdata:2#p0,e,b$nano11Dir\boot\etfsboot.com#pEF,e,b$nano11Dir\efi\microsoft\boot\efisys.bin"
+    } elseif ($hasUefiBoot) {
+        Write-Log "Detected UEFI boot file only (ARM64 or pure UEFI). Using UEFI boot configuration..."
+        $bootData = "-bootdata:1#pEF,e,b$nano11Dir\efi\microsoft\boot\efisys.bin"
+    } elseif ($hasBiosBoot) {
+        Write-Log "Detected BIOS boot file only. Using BIOS boot configuration..."
+        $bootData = "-b$nano11Dir\boot\etfsboot.com"
+    }
+
+    & $OSCDIMG '-m' '-o' '-u2' '-udfver102' $bootData $nano11Dir $outputISO
 
     if (Test-Path $outputISO) {
         $isoSize = [math]::Round((Get-Item $outputISO).Length / 1GB, 2)
@@ -1389,6 +1401,7 @@ function Write-BuildInfo {
             windows_build = $script:DetectedBuildNumber
             full_version  = $script:DetectedFullVersion
             image_name    = $script:DetectedImageName
+            architecture  = $script:architecture
             image_index   = $INDEX
             generated_at  = (Get-Date -Format 'o')
         }

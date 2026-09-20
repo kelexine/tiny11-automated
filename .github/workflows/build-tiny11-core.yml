@@ -21,15 +21,9 @@ on:
         required: false
         default: ''
       image_index:
-        description: 'Windows image index (1=Home, 4=Education, 6=Pro, 7=Pro N)'
+        description: 'Windows image index (1=Home, 4=Education, 6=Pro, 7=Pro N, or custom ARM64 index)'
         required: true
         default: '1'
-        type: choice
-        options:
-          - '1'
-          - '4'
-          - '6'
-          - '7'
       language:
         description: 'Language (e.g., English, Spanish, French)'
         required: false
@@ -87,11 +81,16 @@ jobs:
           $index = "${{ github.event.inputs.image_index }}"
           $editions = @{
               "1" = "Home"
+              "2" = "Pro"
+              "3" = "HomeSingleLanguage"
               "4" = "Education"
               "6" = "Pro"
               "7" = "ProN"
           }
           $edition = $editions[$index]
+          if (-not $edition) {
+              $edition = "Edition$index"
+          }
 
           $language = "${{ github.event.inputs.language }}" -replace '[^a-zA-Z]', ''
 
@@ -386,10 +385,18 @@ jobs:
           $edition = "$env:EDITION_NAME"
           $date = "$env:BUILD_DATE"
 
-          $isoName = "Tiny11Core-$version-$buildNumber-$language-$edition-$date.iso"
+          $arch = ""
+          if ($buildInfo -and $buildInfo.architecture) {
+            $arch = $buildInfo.architecture.ToLower()
+          }
+          if ([string]::IsNullOrWhiteSpace($arch)) {
+            $arch = "x64"
+          }
 
-          # Build-number-first tag, suffixed to avoid collisions across editions
-          $baseTag = "$buildNumber-core-$($edition.ToLower())"
+          $isoName = "Tiny11Core-$version-$buildNumber-$arch-$language-$edition-$date.iso"
+
+          # Build-number-first tag, suffixed to avoid collisions across editions and architectures
+          $baseTag = "$buildNumber-core-$($edition.ToLower())-$arch"
 
           Write-Output "Generated ISO name: $isoName"
           Write-Output "Generated release tag: $baseTag"
