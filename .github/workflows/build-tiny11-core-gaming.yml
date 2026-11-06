@@ -1,8 +1,8 @@
 # GitHub Actions Workflow for building Tiny11 Core-Gaming ISO
-# Author: kelexine (https://github.com/kelexine)
+# Author: Sensei002 (https://github.com/Sensei002)
 # Description: Fully automated Windows 11 Core ISO processing with the latency-first
 #              Core-Gaming profile layered on top of tiny11coremaker.
-# Repository: https://github.com/kelexine/tiny11-automated
+# Repository: https://github.com/Sensei002/tiny11-automated
 #
 # Everything from "Build and Release Tiny11 Core" is preserved. The extra inputs below
 # map 1:1 onto the groups in config/gaming_profile.json, so any of them can be turned
@@ -27,7 +27,7 @@ on:
         required: false
         default: ''
       windows_build:
-        description: 'Fallback Windows build number (e.g. 26200.8655) — only used if it cannot be read directly from the ISO'
+        description: 'Fallback Windows build number (e.g. 26200.8655) вЂ” only used if it cannot be read directly from the ISO'
         required: false
         default: ''
       image_index:
@@ -94,13 +94,8 @@ on:
         type: boolean
         required: false
         default: false
-      preserve_winre:
-        description: 'Preserve winre.wim (required for real hardware / 24H2+ installs to avoid 0x8007000B)'
-        type: boolean
-        required: false
-        default: false
       remove_defender:
-        description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image. Redundant on this workflow: Core-Gaming always removes Defender and the whole Windows Update stack.'
+        description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image. Redundant on this workflow: Core-Gaming always removes Defender.'
         type: boolean
         required: false
         default: false
@@ -112,10 +107,41 @@ on:
         options:
           - 'auto-admin'
           - 'classic'
+      update_to_latest:
+        description: 'Install the newest cumulative update Microsoft has published for this build before debloating, so the image is not stuck at the ISO build. "required" fails the build if the update cannot be applied, "best-effort" publishes the image at the ISO build instead, and "off" skips the update entirely. Adds a ~5 GB download and 20-40 minutes.'
+        type: choice
+        required: false
+        default: 'required'
+        options:
+          - 'required'
+          - 'best-effort'
+          - 'off'
+      pause_windows_update:
+        description: 'Keep the Windows Update stack installed but paused until the year 3000. Checked (default): nothing is removed, so Settings shows a real paused state and the revert script can resume it - the machine stays quiet without Windows trying to repair a broken stack. Unchecked: Windows Update behaves exactly like a stock Windows 11 install.'
+        type: boolean
+        required: false
+        default: true
 
-      # ---------------- Gaming profile groups ----------------
+      # ---------------- Gaming profile ----------------
+      #
+      # One preset plus two exceptions. The 14 group booleans that used to live here
+      # are gone: this workflow sits at GitHub's 25 workflow_dispatch input cap, and a
+      # 26th input makes the whole file unparseable - it then shows up in the Actions
+      # UI named after its path and runs as a 0-job failure. The per-group switches
+      # still exist, in config/gaming_profile.json, in the local builder's group
+      # editor, and on the builder as -GamingGroups.
+      gaming_tweaks:
+        description: 'Gaming: apply the full Core-Gaming tweak set (all 14 profile groups at their defaults: power scheme, security mitigations off, Xbox stack removed, background noise stripped, instant windows, MPO off, input latency, interrupt latency, FSO off, Game Mode off, printing off). Uncheck for a bare Core image with only the two exceptions below.'
+        type: boolean
+        required: false
+        default: true
+      disable_cpu_idle:
+        description: 'Gaming: Force CPU to C-State 0 (no idle). OFF by default - it stops turbo on a lot of hardware (a 3.6 GHz CPU then reads 3.4 GHz) and raises idle power. Enable only if you measured a wake-latency win. Independent of gaming_tweaks.'
+        type: boolean
+        required: false
+        default: false
       hags:
-        description: 'Gaming: Hardware Accelerated GPU Scheduling. "on" forces it on, "off" forces it off, "leave" keeps the Core default.'
+        description: 'Gaming: Hardware Accelerated GPU Scheduling. "on" forces it on, "off" forces it off, "leave" keeps the Core default. Independent of gaming_tweaks.'
         type: choice
         required: false
         default: 'on'
@@ -123,76 +149,6 @@ on:
           - 'on'
           - 'off'
           - 'leave'
-      atlas_power_scheme:
-        description: 'Gaming: AtlasOS-style power scheme (no CPU parking, no USB/PCIe power saving, 100% min processor state).'
-        type: boolean
-        required: false
-        default: true
-      disable_cpu_idle:
-        description: 'Gaming: Force CPU to C-State 0 (no idle) to remove C-State wake latency. Higher idle power and temps.'
-        type: boolean
-        required: false
-        default: true
-      disable_security_mitigations:
-        description: 'Gaming: Disable VBS, Memory Integrity (HVCI), Credential Guard, System Guard and Spectre/Meltdown mitigations. Biggest FPS lever - and a real security downgrade.'
-        type: boolean
-        required: false
-        default: true
-      remove_xbox_gaming_stack:
-        description: 'Gaming: Remove the Xbox Live / Gaming Services stack. BREAKS Game Pass, Microsoft Store games and Play Anywhere titles.'
-        type: boolean
-        required: false
-        default: true
-      strip_background_noise:
-        description: 'Gaming: Disable Windows Search indexing, Bluetooth, Delivery Optimization, background apps, visual effects and scripted diagnostics.'
-        type: boolean
-        required: false
-        default: true
-      instant_windows:
-        description: 'Gaming: Fastest window open/close - removes window/menu/hover animations and shell delays, and shortens the app-close timeouts (WaitToKillAppTimeout 20s -> 2s).'
-        type: boolean
-        required: false
-        default: true
-      disable_fast_startup:
-        description: 'Gaming: Disable hibernation and Fast Startup (Hiberboot).'
-        type: boolean
-        required: false
-        default: true
-      network_latency_tweaks:
-        description: 'Gaming: Disable Nagle, free the QoS reserved bandwidth, stop Delivery Optimization seeding, block WU auto-reboot.'
-        type: boolean
-        required: false
-        default: true
-      disable_mpo:
-        description: 'Gaming: Disable Multi-Plane Overlay. Fixes flicker / micro-stutter on some NVIDIA and AMD drivers.'
-        type: boolean
-        required: false
-        default: true
-      latency_input_tweaks:
-        description: 'Gaming: Disable mouse acceleration and accessibility hotkeys; enable the DXGI flip model; turn off USB 3 link power management.'
-        type: boolean
-        required: false
-        default: true
-      interrupt_latency:
-        description: 'Gaming: Per-device latency work at first boot - MSI interrupts with high priority for GPU/NIC, NIC interrupt moderation off + RSS on, USB/HID power management off. Targets 1% lows rather than average FPS.'
-        type: boolean
-        required: false
-        default: true
-      disable_fso:
-        description: 'Gaming: Force true fullscreen exclusive instead of Fullscreen Optimizations.'
-        type: boolean
-        required: false
-        default: true
-      disable_game_mode:
-        description: 'Gaming: Disable Windows Game Mode (AtlasOS default - its useful work is already done by disabling WU/telemetry/background apps).'
-        type: boolean
-        required: false
-        default: true
-      disable_printing:
-        description: 'Gaming: Disable print services and remove the printing optional features.'
-        type: boolean
-        required: false
-        default: true
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -305,11 +261,20 @@ jobs:
             exit 1
           }
 
-          . "scripts\essentials-profile.ps1"
-          Initialize-EssentialsModule -LogFile $null -ProfileDirectory "config"
+          # Import inside a strict-mode scope, exactly the way tiny11coremaker-headless.ps1
+          # calls it. The builder runs under Set-StrictMode -Version Latest, and an empty
+          # validation result unrolls to $null - $null.Count only throws under strict mode.
+          # Without this the validation step passes while the build fails, which is what
+          # happened in run 39375184068.
+          $importEssentials = {
+            Set-StrictMode -Version Latest
+            . "scripts\essentials-profile.ps1"
+            Initialize-EssentialsModule -LogFile $null -ProfileDirectory "config"
+            Import-EssentialsProfile -Path $essentialsPath
+          }
 
           try {
-            $essentials = Import-EssentialsProfile -Path $essentialsPath
+            $essentials = & $importEssentials
           } catch {
             Write-Error "Essentials profile is invalid: $_"
             exit 1
@@ -348,7 +313,7 @@ jobs:
               version = "${{ inputs.windows_version }}"
               build_type = "Core-Gaming"
               edition = "$env:EDITION_NAME"
-              preserve_winre = "${{ inputs.preserve_winre }}"
+              preserve_winre = "true"
               enable_dotnet35 = "${{ inputs.enable_dotnet35 }}"
               gaming_profile = "core-gaming"
               hags_mode = "${{ inputs.hags }}"
@@ -625,60 +590,85 @@ jobs:
             Write-Output "Cleanup will be skipped (debugging mode)"
           }
 
+          # One tri-state input instead of two booleans, because GitHub allows at
+          # most 25 workflow_dispatch inputs and the Core-Gaming workflow was
+          # already at the cap. "required" is the default, so a published image
+          # is always the current build.
+          $updateMode = "${{ github.event.inputs.update_to_latest }}"
+          if ([string]::IsNullOrWhiteSpace($updateMode)) { $updateMode = 'required' }
+          if ($updateMode -eq 'off') {
+            Write-Output "Skipping the cumulative update (update_to_latest = off)"
+          } else {
+            $params.UpdateToLatest = $true
+            Write-Output "Will install the newest cumulative update before debloating (mode: $updateMode)"
+            if ($updateMode -eq 'required') {
+              $params.RequireLatestUpdate = $true
+              Write-Output "The build fails if the update cannot be applied"
+            }
+          }
+
           $enableDotNet = [System.Boolean]::Parse("${{ github.event.inputs.enable_dotnet35 }}")
-          $preserveWinRE = [System.Boolean]::Parse("${{ github.event.inputs.preserve_winre }}")
+          # WinRE is always preserved - the builder has no switch for it any more.
           $removeDefender = ("${{ github.event.inputs.remove_defender }}" -eq "true")
 
           $accountSetup = "${{ github.event.inputs.account_setup }}"
           if ([string]::IsNullOrWhiteSpace($accountSetup)) { $accountSetup = 'auto-admin' }
 
-          # Map the workflow toggles onto the profile's group names. Any group left
-          # out here falls back to its default in config/gaming_profile.json.
-          $gamingGroups = @{
-            atlas_power_scheme          = ("${{ github.event.inputs.atlas_power_scheme }}"          -eq 'true')
-            disable_cpu_idle            = ("${{ github.event.inputs.disable_cpu_idle }}"            -eq 'true')
-            disable_security_mitigations = ("${{ github.event.inputs.disable_security_mitigations }}" -eq 'true')
-            remove_xbox_gaming_stack    = ("${{ github.event.inputs.remove_xbox_gaming_stack }}"    -eq 'true')
-            strip_background_noise      = ("${{ github.event.inputs.strip_background_noise }}"      -eq 'true')
-            instant_windows             = ("${{ github.event.inputs.instant_windows }}"             -eq 'true')
-            disable_fast_startup        = ("${{ github.event.inputs.disable_fast_startup }}"        -eq 'true')
-            network_latency_tweaks      = ("${{ github.event.inputs.network_latency_tweaks }}"      -eq 'true')
-            disable_mpo                 = ("${{ github.event.inputs.disable_mpo }}"                 -eq 'true')
-            latency_input_tweaks        = ("${{ github.event.inputs.latency_input_tweaks }}"        -eq 'true')
-            interrupt_latency           = ("${{ github.event.inputs.interrupt_latency }}"           -eq 'true')
-            disable_fso                 = ("${{ github.event.inputs.disable_fso }}"                 -eq 'true')
-            disable_game_mode           = ("${{ github.event.inputs.disable_game_mode }}"           -eq 'true')
-            disable_printing            = ("${{ github.event.inputs.disable_printing }}"            -eq 'true')
+          # One preset plus two exceptions.
+          #
+          # gaming_tweaks on  -> no overrides at all, so every group takes its default
+          #                      from config/gaming_profile.json.
+          # gaming_tweaks off -> every group forced off, which leaves a bare Core image
+          #                      plus whatever the two exceptions below ask for.
+          #
+          # disable_cpu_idle is always written explicitly rather than left to the
+          # profile default: it is the one group with a documented hardware downside, so
+          # turning the preset on must not quietly enable it.
+          $gamingTweaks = ("${{ github.event.inputs.gaming_tweaks }}" -ne 'false')
+          $disableCpuIdle = ("${{ github.event.inputs.disable_cpu_idle }}" -eq 'true')
+
+          $gamingGroups = @{}
+          if (-not $gamingTweaks) {
+            foreach ($group in @(
+              'atlas_power_scheme', 'disable_security_mitigations', 'remove_xbox_gaming_stack',
+              'strip_background_noise', 'instant_windows', 'disable_fast_startup',
+              'network_latency_tweaks', 'disable_mpo', 'latency_input_tweaks',
+              'interrupt_latency', 'disable_fso', 'disable_game_mode', 'disable_printing'
+            )) { $gamingGroups[$group] = $false }
           }
+          $gamingGroups['disable_cpu_idle'] = $disableCpuIdle
 
           $hagsMode = "${{ github.event.inputs.hags }}"
           if ([string]::IsNullOrWhiteSpace($hagsMode)) { $hagsMode = 'on' }
+
+          # Paused is the default, so an unset input must mean paused rather than live.
+          $pauseUpdates = ("${{ github.event.inputs.pause_windows_update }}" -ne 'false')
+          $windowsUpdateMode = 'live'
+          if ($pauseUpdates) { $windowsUpdateMode = 'paused' }
 
           Write-Output "=== Starting Tiny11 Core-Gaming Builder ==="
           Write-Output "ISO Drive: $($params.ISO)"
           Write-Output "Image Index: $($params.INDEX)"
           Write-Output ".NET 3.5: $enableDotNet"
-          Write-Output "Preserve WinRE: $preserveWinRE"
+          Write-Output "Preserve WinRE: always (the builder no longer has a toggle)"
           Write-Output "Remove Defender: $removeDefender"
           Write-Output "Account setup: $accountSetup"
           Write-Output "HAGS: $hagsMode"
-          Write-Output "Gaming groups:"
-          foreach ($name in ($gamingGroups.Keys | Sort-Object)) {
-            $state = if ($gamingGroups[$name]) { 'ON ' } else { 'off' }
-            Write-Output "  [$state] $name"
-          }
+          Write-Output "Gaming tweaks: $gamingTweaks"
+          Write-Output "  [$(if ($disableCpuIdle) { 'ON ' } else { 'off' })] disable_cpu_idle (C-State 0)"
+          Write-Output "Windows Update mode: $windowsUpdateMode"
           Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 
           $startTime = Get-Date
 
           .\scripts\tiny11coremaker-headless.ps1 @params `
             -ENABLE_DOTNET35:$enableDotNet `
-            -PreserveWinRE:$preserveWinRE `
             -RemoveDefender:$removeDefender `
             -AccountSetup $accountSetup `
             -GamingProfile `
             -GamingGroups $gamingGroups `
-            -HagsMode $hagsMode
+            -HagsMode $hagsMode `
+            -WindowsUpdateMode $windowsUpdateMode
 
           $buildTime = (Get-Date) - $startTime
           Write-Output "Core-Gaming build completed in $($buildTime.TotalMinutes.ToString('F2')) minutes"
@@ -778,6 +768,7 @@ jobs:
           Tiny11 Core-Gaming ISO Verification
           ===================================
           File: $isoName
+          Folder: $env:FOLDER_NAME
           Windows Build: $buildNumber
           Size: ${sizeGB}GB
           Build Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
@@ -785,15 +776,18 @@ jobs:
           Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
           BUILD TYPE: TINY11 CORE-GAMING (latency-first, AtlasOS-style)
-          WinRE: $(if ("${{ github.event.inputs.preserve_winre }}" -eq "true") { "Preserved" } else { "Removed (stub)" })
+          WinRE: Preserved
           .NET 3.5: ${{ github.event.inputs.enable_dotnet35 }}
           HAGS: ${{ github.event.inputs.hags }}
 
           SECURITY FEATURES DISABLED
-            VBS / Memory Integrity / Credential Guard : ${{ github.event.inputs.disable_security_mitigations }}
-            Spectre / Meltdown mitigations             : ${{ github.event.inputs.disable_security_mitigations }}
+            VBS / Memory Integrity / Credential Guard : ${{ github.event.inputs.gaming_tweaks }}
+            Spectre / Meltdown mitigations             : ${{ github.event.inputs.gaming_tweaks }}
             Windows Defender removed                   : ${{ github.event.inputs.remove_defender }}
             Hypervisor (hypervisorlaunchtype)          : off
+
+          WINDOWS UPDATE
+            Mode: ${{ github.event.inputs.pause_windows_update == 'false' && 'live (stock Windows Update)' || 'paused until 3000-01-01' }}
 
           Revert script inside the image:
             C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1
@@ -844,8 +838,8 @@ jobs:
               edition = "$env:EDITION_NAME"
               duration = $duration
               iso_size = $isoSize
-              download_url = "https://sourceforge.net/projects/tiny-11-releases/"
-              preserve_winre = "${{ inputs.preserve_winre }}"
+              download_url = "https://sourceforge.net/projects/tiny11-automated/"
+              preserve_winre = "true"
               enable_dotnet35 = "${{ inputs.enable_dotnet35 }}"
               gaming_profile = "core-gaming"
               hags_mode = "${{ inputs.hags }}"
@@ -948,7 +942,7 @@ jobs:
         shell: pwsh
         env:
           SF_USERNAME: ${{ secrets.SF_USERNAME }}
-          SF_PROJECT: ${{ secrets.SF_PROJECT }}
+          SF_PROJECT: ${{ secrets.SF_PROJECT || github.event.repository.name }}
           ISO_NAME: ${{ env.ISO_NAME }}
           FOLDER_NAME: ${{ env.FOLDER_NAME }}
         run: |
@@ -957,10 +951,10 @@ jobs:
           Write-Output "Organizing files into folder: $env:FOLDER_NAME"
           New-Item -ItemType Directory -Force -Path $env:FOLDER_NAME | Out-Null
 
+          # Only the ISO is published to SourceForge, so a release folder is a plain
+          # list of images. The checksums and the verification file stay as GitHub
+          # release assets and in the workflow artifact.
           Copy-Item $env:ISO_NAME $env:FOLDER_NAME
-          Copy-Item "$env:ISO_NAME.sha256" $env:FOLDER_NAME
-          Copy-Item "$env:ISO_NAME.md5" $env:FOLDER_NAME
-          Copy-Item "$env:ISO_NAME.txt" $env:FOLDER_NAME
 
           if (Test-Path "SOURCEFORGE_README.md") {
             Copy-Item "SOURCEFORGE_README.md" $env:FOLDER_NAME
@@ -969,11 +963,30 @@ jobs:
 
           $remoteRoot = "$env:SF_USERNAME@frs.sourceforge.net:/home/frs/project/$env:SF_PROJECT/"
 
-          Write-Output "Uploading folder..."
-          scp -i $keyPath -r -o StrictHostKeyChecking=no $env:FOLDER_NAME $remoteRoot
+          # Keepalives, because a stalled connection otherwise hangs until the job
+          # timeout. An earlier run sat here for 17 minutes having written zero
+          # bytes and would have burned all 360. ServerAliveInterval=15 with
+          # CountMax=4 gives up on a dead peer in about a minute, and one retry
+          # covers the case where it was the connection rather than the file.
+          $scpOptions = @(
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'ConnectTimeout=30',
+            '-o', 'ServerAliveInterval=15',
+            '-o', 'ServerAliveCountMax=4'
+          )
 
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "SCP Upload failed"
+          $scpExit = 1
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            Write-Output "Uploading folder (attempt $attempt of 2)..."
+            scp -i $keyPath -r @scpOptions $env:FOLDER_NAME $remoteRoot
+            $scpExit = $LASTEXITCODE
+            if ($scpExit -eq 0) { break }
+            Write-Output "SCP exited with $scpExit"
+            if ($attempt -lt 2) { Start-Sleep -Seconds 15 }
+          }
+
+          if ($scpExit -ne 0) {
+            Write-Error "SCP Upload failed after 2 attempt(s)"
             exit 1
           }
           Write-Output "Upload success!"
@@ -991,8 +1004,7 @@ jobs:
             Write-Output "SSH key cleaned up"
           }
 
-      - name: Upload ISO as artifact (fallback)
-        if: env.DO_UPLOAD != 'true'
+      - name: Upload ISO as artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ISO_NAME }}
@@ -1022,19 +1034,19 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Tiny11 Core-Gaming Windows 11 ${{ github.event.inputs.windows_version }} - ${{ env.RELEASE_TAG }}
           body: |
-            ## 🎮 Tiny11 Core-Gaming Windows 11 ${{ github.event.inputs.windows_version }}
+            ## рџЋ® Tiny11 Core-Gaming Windows 11 ${{ github.event.inputs.windows_version }}
 
             **Latency-first, AtlasOS-style build on top of Tiny11 Core.**
 
-            ### 📦 Build Information
+            ### рџ“¦ Build Information
             - **Built with:** [tiny11builder](https://github.com/ntdevlabs/tiny11builder) by ntdevlabs
-            - **Modified by:** [kelexine](https://github.com/kelexine)
+            - **Modified by:** [Sensei002](https://github.com/Sensei002)
             - **Workflow Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
-            ### 📥 Download
+            ### рџ“Ґ Download
             ${{ secrets.SF_SSH_KEY != '' && format('**SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || '**GitHub Artifacts:** Check workflow run for download' }}
 
-            ### 💿 Image Details
+            ### рџ’ї Image Details
             | Property | Value |
             |----------|-------|
             | **File** | ${{ env.ISO_NAME }} |
@@ -1043,46 +1055,46 @@ jobs:
             | **Base** | Windows 11 ${{ github.event.inputs.windows_version }} |
             | **Index** | ${{ github.event.inputs.image_index }} |
             | **HAGS** | ${{ github.event.inputs.hags }} |
-            | **WinRE** | ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }} |
+            | **WinRE** | Preserved |
 
-            ### ⚡ Applied in this build
+            ### вљЎ Applied in this build
             | Group | State |
             |-------|-------|
-            | AtlasOS-style power scheme | ${{ github.event.inputs.atlas_power_scheme == 'true' && '✅' || '❌' }} |
-            | CPU idle disabled (C-State 0) | ${{ github.event.inputs.disable_cpu_idle == 'true' && '✅' || '❌' }} |
-            | Security mitigations off | ${{ github.event.inputs.disable_security_mitigations == 'true' && '✅' || '❌' }} |
-            | Xbox / Gaming Services removed | ${{ github.event.inputs.remove_xbox_gaming_stack == 'true' && '✅' || '❌' }} |
-            | Background noise stripped | ${{ github.event.inputs.strip_background_noise == 'true' && '✅' || '❌' }} |
-            | Instant window open/close | ${{ github.event.inputs.instant_windows == 'true' && '✅' || '❌' }} |
-            | Fast Startup disabled | ${{ github.event.inputs.disable_fast_startup == 'true' && '✅' || '❌' }} |
-            | Network latency tweaks | ${{ github.event.inputs.network_latency_tweaks == 'true' && '✅' || '❌' }} |
-            | MPO disabled | ${{ github.event.inputs.disable_mpo == 'true' && '✅' || '❌' }} |
-            | Input latency tweaks | ${{ github.event.inputs.latency_input_tweaks == 'true' && '✅' || '❌' }} |
-            | Fullscreen Optimizations off | ${{ github.event.inputs.disable_fso == 'true' && '✅' || '❌' }} |
-            | Game Mode off | ${{ github.event.inputs.disable_game_mode == 'true' && '✅' || '❌' }} |
-            | Printing disabled | ${{ github.event.inputs.disable_printing == 'true' && '✅' || '❌' }} |
+            | Gaming tweaks (full preset) | ${{ github.event.inputs.gaming_tweaks == 'false' && 'вќЊ' || 'вњ…' }} |
+            | CPU idle disabled (C-State 0) | ${{ github.event.inputs.disable_cpu_idle == 'true' && 'вњ…' || 'вќЊ' }} |
+            | HAGS | ${{ github.event.inputs.hags }} |
+            | Windows Update | ${{ github.event.inputs.pause_windows_update == 'false' && 'live' || 'paused until 3000-01-01' }} |
 
-            ### ⚠️ Security Notice
+            ### вљ пёЏ Security Notice
             This image disables VBS / Memory Integrity, Credential Guard and the
             Spectre/Meltdown kernel mitigations by default, and removes Defender when
             `remove_defender` is set. That is a deliberate, measurable performance
-            trade-off — **not a safe daily-driver configuration.**
+            trade-off вЂ” **not a safe daily-driver configuration.**
 
-            ### 🔁 Reverting
+            ### рџ”Ѓ Reverting
             Two files ship inside the image:
-            - `C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1` — restores the reversible settings
-            - `C:\Windows\Tiny11Gaming\GAMING_PROFILE.md` — the exact list of what was changed
+            - `C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1` вЂ” restores the reversible settings
+            - `C:\Windows\Tiny11Gaming\GAMING_PROFILE.md` вЂ” the exact list of what was changed
 
-            ### ❌ What's Removed
-            ${{ github.event.inputs.preserve_winre != 'true' && '- **Windows Recovery Environment (WinRE)**' || '' }}
+            ### вќЊ What's Removed
             - **Windows Component Store (WinSxS)**
-            - **Windows Update Service**
             - **Xbox / Gaming Services** (breaks Game Pass and Microsoft Store games)
             - **Printing** (services and optional features)
             - Microsoft Edge, OneDrive, Teams, Copilot, Chat
             - Telemetry, diagnostics, background apps
 
-            ### 🔒 Checksums
+            ### рџ”„ Windows Update
+            The update stack is **not removed**. It ships intact and paused until
+            3000-01-01, so Settings shows a real paused state instead of a broken one,
+            and `Undo-GamingTweaks.ps1` can resume it by clearing the pause keys.
+
+            Be aware that a Core image also minimises WinSxS, so resuming updates on
+            this build will most likely fail to install them. The pause exists to keep
+            the machine quiet and reversible вЂ” it is not a promise that the image can
+            be patched later. Build with `pause_windows_update` unchecked for stock
+            Windows Update behaviour.
+
+            ### рџ”’ Checksums
 
             **SHA256:**
             ```
@@ -1096,7 +1108,7 @@ jobs:
 
             ---
 
-            **⚠️ Disclaimer:** This is an unofficial Windows 11 modification. Use at your own risk. Not affiliated with Microsoft. Requires a valid Windows license.
+            **вљ пёЏ Disclaimer:** This is an unofficial Windows 11 modification. Use at your own risk. Not affiliated with Microsoft. Requires a valid Windows license.
           draft: false
           prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -1104,40 +1116,41 @@ jobs:
             ${{ env.ISO_NAME }}.sha256
             ${{ env.ISO_NAME }}.md5
             ${{ env.ISO_NAME }}.txt
+            tiny11.ps1
 
       - name: Workflow summary
         shell: pwsh
         run: |
           $summary = @"
-          # ✅ Tiny11 Core-Gaming Build Completed
+          # вњ… Tiny11 Core-Gaming Build Completed
 
-          ## 📦 Build Information
+          ## рџ“¦ Build Information
           - **ISO:** $env:ISO_NAME
           - **Size:** $env:ISO_SIZE_GB GB
           - **Release:** ${{ env.RELEASE_TAG }}
           - **Version:** ${{ github.event.inputs.windows_version }}
           - **Type:** Core-Gaming (latency-first, AtlasOS-style)
           - **HAGS:** ${{ github.event.inputs.hags }}
-          - **WinRE:** ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }}
+          - **WinRE:** Preserved
 
-          ## 📥 Download
-          ${{ secrets.SF_SSH_KEY != '' && format('🔗 **SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || '🔗 **GitHub Artifacts:** Available in workflow run' }}
+          ## рџ“Ґ Download
+          ${{ secrets.SF_SSH_KEY != '' && format('рџ”— **SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || 'рџ”— **GitHub Artifacts:** Available in workflow run' }}
 
-          ## 🔒 Checksums
+          ## рџ”’ Checksums
           **SHA256:** ``````
           $env:ISO_SHA256
           ``````
 
-          ## ⚠️ Security Notice
+          ## вљ пёЏ Security Notice
           VBS / Memory Integrity, Credential Guard and Spectre-Meltdown mitigations are
           disabled in this image by default. Revert with
           ``C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1``.
 
-          ## ⏱️ Build Time
+          ## вЏ±пёЏ Build Time
           Completed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
 
           ---
-          Built by [kelexine](https://github.com/kelexine) | Original by [ntdevlabs](https://github.com/ntdevlabs)
+          Built by [Sensei002](https://github.com/Sensei002) | Original by [ntdevlabs](https://github.com/ntdevlabs)
           "@
 
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
@@ -1163,7 +1176,7 @@ jobs:
             Add-Content -Path $env:GITHUB_ENV -Value $errorSummary
             Add-Content -Path $env:GITHUB_ENV -Value "EOF"
           } else {
-            Add-Content -Path $env:GITHUB_ENV -Value "BUILD_ERROR_SUMMARY=No builder log found — check step outputs above."
+            Add-Content -Path $env:GITHUB_ENV -Value "BUILD_ERROR_SUMMARY=No builder log found вЂ” check step outputs above."
           }
 
       - name: Upload build log on failure
