@@ -93,7 +93,9 @@ function Import-EssentialsProfile {
 
     $profile = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
 
-    $problems = Test-EssentialsProfile -Profile $profile
+    # @() - an empty problem list comes back from the function as $null, and the builders
+    # run under Set-StrictMode -Version Latest, where $null.Count throws.
+    $problems = @(Test-EssentialsProfile -Profile $profile)
     if ($problems.Count -gt 0) {
         throw "Essentials profile $Path is invalid:`n  - $($problems -join "`n  - ")"
     }
@@ -284,9 +286,13 @@ function ConvertTo-EssentialsProviderPath {
 }
 
 function Test-EssentialsRegistryKeyExists {
+    # Test-Path instead of "reg query": a missing key is an expected result, but reg.exe reports
+    # it on stderr, and Windows PowerShell 5.1 turns redirected native stderr into a terminating
+    # error when $ErrorActionPreference = 'Stop' (as in the builders), even with 2>$null.
     param([string]$KeyPath)
-    & reg query $KeyPath 2>$null | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    $psPath = ConvertTo-EssentialsProviderPath -KeyPath $KeyPath
+    if (-not $psPath) { return $false }
+    return [bool](Test-Path -LiteralPath $psPath -ErrorAction SilentlyContinue)
 }
 
 function Set-EssentialsRegistryValue {
@@ -363,7 +369,7 @@ function Invoke-EssentialsRegistryTweaks {
             continue
         }
 
-        & reg delete $keyPath /f 2>$null | Out-Null
+        & { $ErrorActionPreference = 'Continue'; & reg delete $keyPath /f 2>&1 | Out-Null }
         if ($LASTEXITCODE -eq 0) {
             $deleted++
             Write-EssentialsLog "  deleted key $hive\$path  [$item]"
