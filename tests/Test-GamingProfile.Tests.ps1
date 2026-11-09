@@ -15,6 +15,7 @@
 #>
 
 BeforeAll {
+    Set-StrictMode -Version Latest
     $repoRoot = Split-Path $PSScriptRoot -Parent
     $configDir = Join-Path $repoRoot 'config'
     $scriptsDir = Join-Path $repoRoot 'scripts'
