@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Headless script to build a minimized Windows 11 Core image for CI/CD automation.
 
@@ -584,6 +584,7 @@ function Remove-SystemPackages {
         "Microsoft-Windows-TabletPCMath-Package~",
         "Microsoft-Windows-StepsRecorder-Package~",
         "UserExperience-Recall-Package~",
+        "Microsoft-Windows-BitLocker-DriveEncryption-FVE-Package~",
         "Microsoft-Windows-AppManagement-AppV-Package~",
         "Microsoft-Edge-WebView-FOD-Package~"
     )
@@ -910,6 +911,38 @@ function Remove-EdgeAndOneDrive {
             Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+}
+
+function Remove-BitLockerComponents {
+    Write-Log "Removing BitLocker components and binaries..."
+
+    $bitlockerPaths = @(
+        "$scratchDir\Windows\BitLockerDiscoveryVolumeContents",
+        "$scratchDir\Windows\System32\BitLockerWizard.exe",
+        "$scratchDir\Windows\System32\BitLockerWizardElev.exe",
+        "$scratchDir\Windows\System32\BitLockerDeviceEncryption.exe",
+        "$scratchDir\Windows\System32\BitLockerCsp.dll",
+        "$scratchDir\Windows\SysWOW64\BitLockerCsp.dll"
+    )
+
+    foreach ($path in $bitlockerPaths) {
+        if (Test-Path $path) {
+            Write-Log "Deleting: $path"
+            & takeown /f $path /r /a 2>&1 | Out-Null
+            & icacls $path /grant "$($adminGroup.Value):(F)" /T /C 2>&1 | Out-Null
+            Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Delete BitLocker MUI localization files
+    Get-ChildItem -Path "$scratchDir\Windows\System32" -Filter "BitLocker*.mui" -Recurse -File -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            & takeown /f $_.FullName /a 2>&1 | Out-Null
+            & icacls $_.FullName /grant "$($adminGroup.Value):(F)" /C 2>&1 | Out-Null
+            Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+
+    Write-Log "BitLocker components removed"
 }
 
 function Remove-WinRE {
@@ -1274,8 +1307,11 @@ function Apply-RegistryTweaks {
     # Disable reserved storage
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' 'ShippedWithReserves' 'REG_DWORD' '0'
 
-    # Disable BitLocker
+    # Disable BitLocker and automatic device encryption
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' 'PreventDeviceEncryption' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitlockerStatus' 'BootStatus' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\BDESVC' 'Start' 'REG_DWORD' '4'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\BitLocker' 'IsBdeDriverPresent' 'REG_DWORD' '0'
 
     # Disable Chat icon
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' 'ChatIcon' 'REG_DWORD' '3'
@@ -1321,8 +1357,11 @@ function Apply-RegistryTweaks {
     # Disable reserved storage
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' 'ShippedWithReserves' 'REG_DWORD' '0'
 
-    # Disable BitLocker
+    # Disable BitLocker and automatic device encryption
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' 'PreventDeviceEncryption' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitlockerStatus' 'BootStatus' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\BDESVC' 'Start' 'REG_DWORD' '4'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\BitLocker' 'IsBdeDriverPresent' 'REG_DWORD' '0'
 
     # Disable Chat icon
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' 'ChatIcon' 'REG_DWORD' '3'
@@ -1942,6 +1981,7 @@ try {
     }
 
     Remove-EdgeAndOneDrive
+    Remove-BitLockerComponents
     if ($PreserveWinRE) {
         Write-Log "Skipping WinRE removal (PreserveWinRE flag set)" "INFO"
     } else {
