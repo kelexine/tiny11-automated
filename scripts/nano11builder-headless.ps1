@@ -91,6 +91,30 @@ function Write-Log {
     Add-Content -Path $logFile -Value $logMessage -ErrorAction SilentlyContinue
 }
 
+function Get-TakeownYesAnswer {
+    # takeown /R needs /D, otherwise it asks "Do you want to replace the directory permissions...? [Y/N]"
+    # on the console for every folder the administrator cannot list (e.g. ProgramData\Microsoft\Windows
+    # Defender Advanced Threat Protection, present only in Pro/Enterprise) and the build waits forever.
+    # /D accepts only the "yes" letter of the system language: Y in English, T in Polish, J in German,
+    # O in French... - "/D Y" is rejected on those systems. Probe once on an empty folder and cache it.
+    $cached = Get-Variable -Name takeownYesAnswer -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($cached) { return $cached }
+
+    $answer = 'Y'
+    $probe = Join-Path ([IO.Path]::GetTempPath()) ('takeown-probe-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $probe -Force | Out-Null
+    try {
+        foreach ($candidate in @('Y', 'T', 'J', 'O', 'S', 'A', 'I', 'E', [string][char]0x414)) {
+            & { $ErrorActionPreference = 'Continue'; & takeown.exe /F $probe /R /D $candidate 2>&1 | Out-Null }
+            if ($LASTEXITCODE -eq 0) { $answer = $candidate; break }
+        }
+    } finally {
+        Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Set-Variable -Name takeownYesAnswer -Scope Script -Value $answer
+    return $answer
+}
+
 function Write-IsoAnswerFile {
     # Copies the unattend template to $Destination, rewriting the /IMAGE/INDEX
     # placeholder so the edition chosen with -INDEX is the one that actually gets
@@ -396,7 +420,7 @@ function Take-OwnershipOfFolders {
     foreach ($folder in $foldersToOwn) {
         if (Test-Path $folder) {
             Write-Log "Taking ownership: $folder"
-            & takeown.exe /F $folder /R /D Y 2>&1 | Out-Null
+            & takeown.exe /F $folder /R /D $(Get-TakeownYesAnswer) 2>&1 | Out-Null
             & icacls.exe $folder /grant "$($adminGroup.Value):(F)" /T /C 2>&1 | Out-Null
         }
     }
@@ -965,7 +989,7 @@ function Optimize-WinSxS {
 
     # Re-assert ownership to ensure deletion is possible
     Write-Log "Ensuring ownership of WinSxS before deletion..."
-    & takeown.exe /F $sourceDirectory /R /D Y 2>&1 | Out-Null
+    & takeown.exe /F $sourceDirectory /R /D $(Get-TakeownYesAnswer) 2>&1 | Out-Null
     & icacls.exe $sourceDirectory /grant "$($adminGroup.Value):(F)" /T /C 2>&1 | Out-Null
 
     $emptyDir = "$ScratchDisk\empty_temp"

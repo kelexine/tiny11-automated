@@ -220,12 +220,12 @@ Describe 'Gaming power settings JSON' {
     }
 
     It 'carries all 27 settings from the live Atlas scheme' {
-        $atlasSettings = @($power.settings | Where-Object { -not $_.beyondAtlas })
+        $atlasSettings = @($power.settings | Where-Object { -not ($_.PSObject.Properties['beyondAtlas'] -and $_.beyondAtlas) })
         $atlasSettings.Count | Should -Be 27
     }
 
     It 'marks exactly the two settings that differ from Ultimate Performance' {
-        $overrides = @($power.settings | Where-Object { $_.atlasOverride })
+        $overrides = @($power.settings | Where-Object { $_.PSObject.Properties['atlasOverride'] -and $_.atlasOverride })
         $overrides.Count | Should -Be 2
         @($overrides | ForEach-Object { $_.setting }) | Should -Contain '48e6b7a6-50f5-4782-a5d4-53bb8f07e226'
         @($overrides | ForEach-Object { $_.setting }) | Should -Contain '3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e'
