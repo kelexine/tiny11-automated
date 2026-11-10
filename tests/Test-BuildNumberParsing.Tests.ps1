@@ -8,6 +8,10 @@
     Pester 5 requires helper functions and path resolution to live inside BeforeAll:
     code at the top level of a test file runs during discovery, so anything it defines
     (or any $PSScriptRoot it reads) is not visible to the It blocks at run time.
+
+    The -ForEach data, on the other hand, is consumed during discovery, so it must be
+    built in BeforeDiscovery. Built in BeforeAll it is still $null when the It blocks
+    are generated, and Pester 5 then silently generates no tests at all for them.
 #>
 
 BeforeAll {
@@ -21,7 +25,9 @@ BeforeAll {
         }
         return ""
     }
+}
 
+BeforeDiscovery {
     $script:RepoRoot = Split-Path -Parent $PSScriptRoot
     $script:Scripts = @(
         'scripts\tiny11maker-headless.ps1',
@@ -29,7 +35,9 @@ BeforeAll {
         'scripts\nano11builder-headless.ps1'
     ) | ForEach-Object {
         $full = Join-Path $script:RepoRoot $_
-        [pscustomobject]@{
+        # Hashtable (not [pscustomobject]): Pester 5 turns hashtable keys into the
+        # $scriptName / $scriptPath / $content variables and the `<scriptName>` title token.
+        @{
             scriptName = Split-Path -Leaf $full
             scriptPath = $full
             content    = if (Test-Path -LiteralPath $full) { Get-Content -LiteralPath $full -Raw } else { '' }
