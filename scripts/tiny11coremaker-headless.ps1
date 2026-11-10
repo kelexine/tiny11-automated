@@ -213,6 +213,30 @@ function Write-Log {
     Add-Content -Path $logFile -Value $logMessage -ErrorAction SilentlyContinue
 }
 
+function Get-TakeownYesAnswer {
+    # takeown /R needs /D, otherwise it asks "Do you want to replace the directory permissions...? [Y/N]"
+    # on the console for every folder the administrator cannot list (e.g. ProgramData\Microsoft\Windows
+    # Defender Advanced Threat Protection, present only in Pro/Enterprise) and the build waits forever.
+    # /D accepts only the "yes" letter of the system language: Y in English, T in Polish, J in German,
+    # O in French... - "/D Y" is rejected on those systems. Probe once on an empty folder and cache it.
+    $cached = Get-Variable -Name takeownYesAnswer -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($cached) { return $cached }
+
+    $answer = 'Y'
+    $probe = Join-Path ([IO.Path]::GetTempPath()) ('takeown-probe-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $probe -Force | Out-Null
+    try {
+        foreach ($candidate in @('Y', 'T', 'J', 'O', 'S', 'A', 'I', 'E', [string][char]0x414)) {
+            & { $ErrorActionPreference = 'Continue'; & takeown.exe /F $probe /R /D $candidate 2>&1 | Out-Null }
+            if ($LASTEXITCODE -eq 0) { $answer = $candidate; break }
+        }
+    } finally {
+        Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Set-Variable -Name takeownYesAnswer -Scope Script -Value $answer
+    return $answer
+}
+
 function Write-IsoAnswerFile {
     # Copies the unattend template to $Destination, rewriting the /IMAGE/INDEX
     # placeholder so the edition chosen with -INDEX is the one that actually gets
@@ -668,7 +692,7 @@ function Remove-DefenderPayload {
     foreach ($path in $defenderPaths) {
         if (Test-Path $path) {
             Write-Log "Deleting Defender data: $path"
-            & takeown /f $path /r /a | Out-Null
+            & takeown /f $path /r /d $(Get-TakeownYesAnswer) /a | Out-Null
             & icacls $path /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
             Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -854,7 +878,7 @@ function Remove-EdgeAndOneDrive {
     foreach ($path in $edgePaths) {
         if (Test-Path $path) {
             Write-Log "Deleting Edge component: $path"
-            & takeown /f $path /r /a | Out-Null
+            & takeown /f $path /r /d $(Get-TakeownYesAnswer) /a | Out-Null
             & icacls $path /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
             Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -866,7 +890,7 @@ function Remove-EdgeAndOneDrive {
     foreach ($winSxSPath in $winSxSPaths) {
         if (Test-Path $winSxSPath) {
             Write-Log "Taking ownership and removing WinSxS WebView folder: $winSxSPath"
-            & takeown /f $winSxSPath /r /a | Out-Null
+            & takeown /f $winSxSPath /r /d $(Get-TakeownYesAnswer) /a | Out-Null
             & icacls $winSxSPath /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
             Remove-Item -Path $winSxSPath -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -949,7 +973,7 @@ function Remove-WinRE {
     Write-Log "Removing Windows Recovery Environment (winre.wim)..."
 
     $recoveryDir = "$scratchDir\Windows\System32\Recovery"
-    & takeown /f $recoveryDir /r /a 2>&1 | Out-Null
+    & takeown /f $recoveryDir /r /d $(Get-TakeownYesAnswer) /a 2>&1 | Out-Null
     & icacls $recoveryDir /grant "$($adminGroup.Value):(F)" /T /C 2>&1 | Out-Null
 
     $winRE = "$recoveryDir\winre.wim"
@@ -1051,7 +1075,7 @@ function Remove-TreeForcefully {
         for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
             Write-Log "Force-deleting tree (attempt $attempt/$MaxAttempts): $Path" "WARN"
 
-            & takeown.exe /F $long /R /A /D Y 2>&1 | Out-Null
+            & takeown.exe /F $long /R /A /D $(Get-TakeownYesAnswer) 2>&1 | Out-Null
             & icacls.exe  $long /grant "${adminSid}:(F)" /T /C /Q 2>&1 | Out-Null
 
             # attrib.exe handles the bulk quickly; the .NET pass afterwards
@@ -1088,7 +1112,7 @@ function Optimize-WinSxS {
 
     # Take ownership
     Write-Log "Taking ownership of WinSxS..."
-    & takeown /f $sourceDirectory /r /a | Out-Null
+    & takeown /f $sourceDirectory /r /d $(Get-TakeownYesAnswer) /a | Out-Null
     & icacls $sourceDirectory /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
 
     $dirsToCopy = @()
