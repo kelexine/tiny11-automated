@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Headless script to build a minimized Windows 11 Nano image for CI/CD automation.
 
@@ -791,7 +791,7 @@ function Remove-BitLockerComponents {
     foreach ($path in $bitlockerPaths) {
         if (Test-Path $path) {
             Write-Log "Deleting: $path"
-            & takeown.exe /f $path /r /a 2>&1 | Out-Null
+            & takeown.exe /f $path /r /d $(Get-TakeownYesAnswer) /a 2>&1 | Out-Null
             & icacls.exe $path /grant "$($adminGroup.Value):(F)" /T /C 2>&1 | Out-Null
             Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
         }
