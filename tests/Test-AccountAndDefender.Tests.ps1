@@ -204,3 +204,19 @@ Describe "Workflows expose the new toggles" {
         $content | Should -Match ([regex]::Escape('-AccountSetup $accountSetup'))
     }
 }
+
+Describe "Builder scripts encoding (Windows PowerShell 5.1 compatibility)" {
+
+    It "preserves UTF-8 BOM on builder scripts containing non-ASCII characters" {
+        $builderFiles = @(
+            'tiny11coremaker-headless.ps1',
+            'nano11builder-headless.ps1',
+            'tiny11maker-headless.ps1'
+        )
+        foreach ($file in $builderFiles) {
+            $path = Join-Path $script:RepoRoot "scripts\$file"
+            $bytes = [System.IO.File]::ReadAllBytes($path)
+            ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) | Should -BeTrue -Because "$file must have UTF-8 BOM for PowerShell 5.1 compatibility"
+        }
+    }
+}
