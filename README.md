@@ -56,8 +56,8 @@ Real screenshots from a Tiny11 build — a near-empty, fast, bloat-free Windows 
 
 ## 📊 Project Stats
 
-- **📦 Total Downloads**: 311795 (and growing!)
-- **🌍 Active Users**: 311795 worldwide
+- **📦 Total Downloads**: 312807 (and growing!)
+- **🌍 Active Users**: 312807 worldwide
 - **✅ Build Success Rate**: 100%
 - **⏱️ Average Build Time**: ~30-50 minutes
 - **💾 ISO Size Reduction**: Up to 50% smaller (Windows 11 26H2)
